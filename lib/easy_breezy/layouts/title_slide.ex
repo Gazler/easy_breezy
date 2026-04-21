@@ -13,18 +13,24 @@ defmodule EasyBreezy.Layouts.TitleSlide do
 
   def title_slide(assigns) do
     theme_colors = Map.get(assigns.render_context, :theme_colors, %{})
+    title_gradient_start = Map.get(assigns.render_context, :title_gradient_start)
+    title_gradient_end = Map.get(assigns.render_context, :title_gradient_end)
 
     assigns =
       assigns
       |> assign(theme_colors: theme_colors)
+      |> assign(title_gradient_start: title_gradient_start)
+      |> assign(title_gradient_end: title_gradient_end)
 
     ~H"""
     <box class="grid grid-cols-1 grid-rows-3 width-full height-full">
       <box>
         <.h1
-          class="text-gradient-to-b from-primary to-secondary"
+          class="text-gradient-to-b"
           theme_colors={@theme_colors}
           background={Map.get(@theme_colors, :surface)}
+          gradient_from={@title_gradient_start}
+          gradient_to={@title_gradient_end}
         >
           {@title}
         </.h1>

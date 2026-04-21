@@ -33,7 +33,7 @@ defmodule EasyBreezy do
 
   defp start_opts(opts) do
     opts
-    |> Keyword.take([:theme, :presenter, :themes])
+    |> Keyword.take([:alt_screen, :theme, :presenter, :themes])
     |> Keyword.put(:deck, resolve_deck(Keyword.fetch!(opts, :deck)))
   end
 

@@ -7,6 +7,8 @@ defmodule EasyBreezy.Slideshow do
   alias Breeze.Theme
 
   @themes [:system16, :system, :nebula, :catppuccin, :dracula, :gruvbox, :nord, :solarized_light]
+  @title_gradient_tick_ms 90
+  @title_gradient_phase_count 120
 
   def mount(opts, term) do
     deck = Keyword.fetch!(opts, :deck)
@@ -14,7 +16,10 @@ defmodule EasyBreezy.Slideshow do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
     {theme_name, theme} = resolve_theme(Keyword.get(opts, :theme, :nebula))
 
-    term = put_theme(term, theme)
+    term =
+      term
+      |> maybe_enter_alt_screen(opts)
+      |> put_theme(theme)
 
     term =
       term
@@ -28,6 +33,7 @@ defmodule EasyBreezy.Slideshow do
         presenter?: Keyword.get(opts, :presenter, false),
         themes: Keyword.get(opts, :themes, @themes),
         started_at_ms: System.monotonic_time(:millisecond),
+        title_gradient_phase: 0,
         theme_name: theme_name,
         actual_theme_mode: term.theme.mode,
         theme_status: Theme.probe_status(term.theme) || :ready
@@ -36,6 +42,8 @@ defmodule EasyBreezy.Slideshow do
       |> assign_theme_colors()
       |> assign_title_gradient(theme_name)
 
+    maybe_schedule_title_gradient_tick(term)
+
     {:ok, clamp_position(term)}
   end
 
@@ -43,6 +51,8 @@ defmodule EasyBreezy.Slideshow do
     {slide, slide_index, step} = visible_position(assigns)
     body_width = max(assigns.screen_width - 6, 20)
     body_height = max(assigns.screen_height - 6, 8)
+
+    {title_gradient_start, title_gradient_end} = animated_title_gradient(assigns)
 
     assigns =
       assigns
@@ -57,8 +67,8 @@ defmodule EasyBreezy.Slideshow do
       |> assign(
         render_context: %{
           theme_colors: assigns.theme_colors,
-          title_gradient_start: assigns.title_gradient_start,
-          title_gradient_end: assigns.title_gradient_end,
+          title_gradient_start: title_gradient_start,
+          title_gradient_end: title_gradient_end,
           code_theme: assigns.code_theme
         }
       )
@@ -126,13 +136,25 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_event(_, %{"key" => "Home"}, term) do
-    {:noreply, clamp_position(assign(term, slide_index: 0, step: 0))}
+    previous_assigns = term.assigns
+
+     {:noreply,
+     term
+     |> assign(slide_index: 0, step: 0)
+     |> clamp_position()
+     |> maybe_restart_title_gradient(previous_assigns)}
   end
 
   def handle_event(_, %{"key" => "End"}, term) do
     last_index = length(term.assigns.deck.slides) - 1
     last_slide = Enum.at(term.assigns.deck.slides, last_index)
-    {:noreply, clamp_position(assign(term, slide_index: last_index, step: last_slide.steps))}
+    previous_assigns = term.assigns
+
+     {:noreply,
+     term
+     |> assign(slide_index: last_index, step: last_slide.steps)
+     |> clamp_position()
+     |> maybe_restart_title_gradient(previous_assigns)}
   end
 
   def handle_event(_, %{"key" => "p"}, term) do
@@ -158,6 +180,18 @@ defmodule EasyBreezy.Slideshow do
     {:noreply, assign(term, screen_width: screen_width, screen_height: screen_height)}
   end
 
+  def handle_info(:title_gradient_tick, term) do
+    if title_gradient_active?(term.assigns) do
+      schedule_title_gradient_tick()
+
+      phase = rem((term.assigns.title_gradient_phase || 0) + 1, @title_gradient_phase_count)
+
+      {:noreply, assign(term, title_gradient_phase: phase)}
+    else
+      {:noreply, term}
+    end
+  end
+
   def handle_info(:transition_tick, %{assigns: %{transition: nil}} = term), do: {:noreply, term}
 
   def handle_info(:transition_tick, term) do
@@ -165,12 +199,16 @@ defmodule EasyBreezy.Slideshow do
     frame = transition.frame + 1
 
     if frame >= transition.frames do
+      previous_assigns = term.assigns
+
       {:noreply,
-       assign(term,
+       term
+       |> assign(
          slide_index: transition.to_index,
          step: transition.to_step,
          transition: nil
-       )}
+       )
+       |> maybe_restart_title_gradient(previous_assigns)}
     else
       Process.send_after(self(), :transition_tick, transition.interval_ms)
       {:noreply, assign(term, transition: %{transition | frame: frame})}
@@ -200,11 +238,14 @@ defmodule EasyBreezy.Slideshow do
                direction,
                term.assigns.actual_theme_mode
              ) do
-            EasyBreezy.Transitions.start(term, next_index, 0, direction)
+            term
+            |> EasyBreezy.Transitions.start(next_index, 0, direction)
+            |> maybe_restart_title_gradient(term.assigns)
           else
             term
             |> assign(slide_index: next_index, step: 0)
             |> maybe_delete_image_overlay(slide.id)
+            |> maybe_restart_title_gradient(term.assigns)
           end
 
         true ->
@@ -212,6 +253,18 @@ defmodule EasyBreezy.Slideshow do
       end
     end
   end
+
+  defp maybe_enter_alt_screen(term, opts) do
+    if Keyword.get(opts, :alt_screen, true) and live_terminal?(term.terminal) do
+      %{term | terminal: Termite.Screen.alt_screen(term.terminal)}
+    else
+      term
+    end
+  end
+
+  defp live_terminal?(%Termite.Terminal{adapter: nil}), do: false
+  defp live_terminal?(%Termite.Terminal{}), do: true
+  defp live_terminal?(_terminal), do: false
 
   defp retreat(term) do
     if term.assigns.transition do
@@ -233,11 +286,14 @@ defmodule EasyBreezy.Slideshow do
                direction,
                term.assigns.actual_theme_mode
              ) do
-            EasyBreezy.Transitions.start(term, previous_index, previous_slide.steps, direction)
+            term
+            |> EasyBreezy.Transitions.start(previous_index, previous_slide.steps, direction)
+            |> maybe_restart_title_gradient(term.assigns)
           else
             term
             |> assign(slide_index: previous_index, step: previous_slide.steps)
             |> maybe_delete_image_overlay(slide.id)
+            |> maybe_restart_title_gradient(term.assigns)
           end
 
         true ->
@@ -321,15 +377,77 @@ defmodule EasyBreezy.Slideshow do
 
   defp assign_title_gradient(term, theme_name) do
     primary = Theme.color(term.theme, :primary)
+    accent = Theme.color(term.theme, :accent)
 
-    {start_color, end_color} =
+    {start_color, end_color, accent_color} =
       if theme_name == :system16 do
-        {primary, primary}
+        {primary, primary, primary}
       else
-        {primary, Theme.color(term.theme, :secondary)}
+        secondary = Theme.color(term.theme, :secondary)
+        {primary, secondary, accent || secondary}
       end
 
-    assign(term, title_gradient_start: start_color, title_gradient_end: end_color)
+    assign(term,
+      title_gradient_start: start_color,
+      title_gradient_end: end_color,
+      title_gradient_accent: accent_color
+    )
+  end
+
+  defp animated_title_gradient(%{
+         theme_name: :system16,
+         title_gradient_start: start_color,
+         title_gradient_end: end_color
+       }),
+       do: {start_color, end_color}
+
+  defp animated_title_gradient(assigns) do
+    start_color = assigns.title_gradient_start
+    end_color = assigns.title_gradient_end
+    accent_color = assigns.title_gradient_accent || end_color
+    phase = (assigns.title_gradient_phase || 0) / @title_gradient_phase_count
+
+    start_mix = wave(phase)
+    end_mix = wave(phase + 0.33)
+
+    {
+      Theme.blend(start_color, accent_color, start_mix),
+      Theme.blend(end_color, start_color, end_mix)
+    }
+  end
+
+  defp wave(phase) do
+    (:math.sin(phase * 2 * :math.pi()) + 1) / 2
+  end
+
+  defp maybe_schedule_title_gradient_tick(term) do
+    if title_gradient_active?(term.assigns), do: schedule_title_gradient_tick()
+    term
+  end
+
+  defp maybe_restart_title_gradient(term, previous_assigns) do
+    if not title_gradient_active?(previous_assigns) and title_gradient_active?(term.assigns) do
+      term
+      |> assign(title_gradient_phase: 0)
+      |> maybe_schedule_title_gradient_tick()
+    else
+      term
+    end
+  end
+
+  defp title_gradient_active?(%{transition: %{from_index: from_index, to_index: to_index}, deck: %{slides: slides}}) do
+    title_slide?(Enum.at(slides, from_index)) or title_slide?(Enum.at(slides, to_index))
+  end
+
+  defp title_gradient_active?(assigns) do
+    title_slide?(current_slide(assigns))
+  end
+
+  defp title_slide?(%{layout: :title}), do: true
+  defp title_slide?(_slide), do: false
+
+  defp schedule_title_gradient_tick do
+    Process.send_after(self(), :title_gradient_tick, @title_gradient_tick_ms)
   end
 
   defp resolve_theme(:system16), do: {:system16, :system16}

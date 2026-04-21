@@ -6,6 +6,8 @@ defmodule EasyBreezy.Transitions do
   import EasyBreezy.Layouts
 
   @slide_transition_duration_ms 200
+  @reference_horizontal_distance 80
+  @reference_vertical_distance 24
   @transition_columns_per_frame 10
   @transition_min_frames 4
 
@@ -77,7 +79,7 @@ defmodule EasyBreezy.Transitions do
     body_height = max(term.assigns.screen_height - 6, 8)
     distance = transition_distance(direction, body_width, body_height)
     frames = transition_frame_count(direction, distance)
-    interval_ms = transition_interval_ms(direction, frames)
+    interval_ms = transition_interval_ms(direction, distance, frames)
 
     Process.send_after(self(), :transition_tick, interval_ms)
 
@@ -107,10 +109,30 @@ defmodule EasyBreezy.Transitions do
     max(div(body_width, @transition_columns_per_frame), @transition_min_frames)
   end
 
-  def transition_interval_ms(_direction, frames) when is_integer(frames) and frames > 0,
-    do: max(div(@slide_transition_duration_ms, frames), 1)
+  def transition_interval_ms(direction, distance, frames)
+      when is_integer(distance) and is_integer(frames) and frames > 0 do
+    duration_ms = scaled_transition_duration_ms(direction, distance)
+    max(div(duration_ms, frames), 1)
+  end
 
   defp transition_frame_count(_direction, distance), do: transition_frames(distance)
+
+  defp scaled_transition_duration_ms(direction, distance) when direction in [:forward, :backward] do
+    scale_duration(distance, @reference_horizontal_distance)
+  end
+
+  defp scaled_transition_duration_ms(direction, distance) when direction in [:up, :down] do
+    scale_duration(distance, @reference_vertical_distance)
+  end
+
+  defp scale_duration(distance, reference_distance) do
+    distance = max(distance, 1)
+
+    scale =
+      max(reference_distance / distance, 1.0)
+
+    round(@slide_transition_duration_ms * scale)
+  end
 
   defp incoming_transition_direction(:slide), do: :forward
   defp incoming_transition_direction(:slide_up), do: :down

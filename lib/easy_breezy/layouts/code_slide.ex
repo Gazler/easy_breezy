@@ -5,6 +5,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
 
   import Breeze.Blocks
 
+  alias BackBreeze.VirtualText.Source
   alias Breeze.Theme
 
   attr(:title, :string, required: true)
@@ -56,19 +57,32 @@ defmodule EasyBreezy.Layouts.CodeSlide do
               line_number,
               line_number_width,
               assigns.body_width,
-              maybe_dim_code_line_content(
+              ansi_line_style(theme_colors, fade, focus_active?, focused?) <>
+                maybe_dim_code_line_content(
                 highlighted_line,
                 theme_colors,
                 focus_active?,
                 focused?
-              ),
+                ),
               theme_colors,
               focus_active?,
               focused?
             ),
-          style: code_line_style(theme_colors, fade, focus_active?, focused?)
+          visible_width: visible_width(raw_line) + gutter_left
         }
       end)
+
+    virtual_content =
+      build_virtual_content(
+        rendered_lines,
+        assigns.source,
+        assigns.language,
+        code_theme,
+        theme_colors,
+        focus_ranges,
+        assigns.body_width,
+        fade
+      )
 
     chrome_fade = if(focus_active?, do: max(fade, 55), else: fade)
 
@@ -76,7 +90,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
       assigns
       |> assign(fade: fade)
       |> assign(theme_colors: theme_colors)
-      |> assign(rendered_lines: rendered_lines)
+      |> assign(virtual_content: virtual_content)
       |> assign(gutter_left: gutter_left)
       |> assign(target_scroll_y: target_scroll_y)
       |> assign(chrome_fade: chrome_fade)
@@ -105,13 +119,41 @@ defmodule EasyBreezy.Layouts.CodeSlide do
           style={@panel_style}
           scroll-offset-y={@target_scroll_y}
         >
-          <box :for={line <- @rendered_lines} id={line.id} class="width-full" style={line.style}>
-            {line.content}
-          </box>
+          {@virtual_content}
         </.scroll>
       </box>
     </box>
     """
+  end
+
+  defp build_virtual_content(
+         rendered_lines,
+         source,
+         language,
+         code_theme,
+         theme_colors,
+         focus_ranges,
+         body_width,
+         fade
+       ) do
+    intrinsic_width =
+      rendered_lines
+      |> Enum.map(& &1.visible_width)
+      |> Enum.max(fn -> 1 end)
+
+    cache_key =
+      {:code_slide, :erlang.phash2({source, language, code_theme, theme_colors, focus_ranges, body_width, fade})}
+
+    Source.lazy(
+      cache_key: cache_key,
+      intrinsic_width: intrinsic_width,
+      line_count_fn: fn _width -> length(rendered_lines) end,
+      slice_fn: fn start_line, visible_count, _width ->
+        rendered_lines
+        |> Enum.slice(start_line, visible_count)
+        |> Enum.map(& &1.content)
+      end
+    )
   end
 
   defp split_code_lines(source) do
@@ -161,39 +203,6 @@ defmodule EasyBreezy.Layouts.CodeSlide do
 
       _ ->
         content
-    end
-  end
-
-  defp code_line_style(theme_colors, amount, focus_active?, focused?)
-
-  defp code_line_style(theme_colors, amount, false, _focused?) do
-    case {Map.get(theme_colors, :panel), Map.get(theme_colors, :text)} do
-      {{_, _, _} = panel, {_, _, _} = text} ->
-        fade_style(amount, %{background_color: panel, foreground_color: text})
-
-      {{_, _, _} = panel, _} ->
-        fade_style(amount, %{background_color: panel})
-
-      _ ->
-        fade_style(amount, %{})
-    end
-  end
-
-  defp code_line_style(theme_colors, amount, true, true),
-    do: code_line_style(theme_colors, amount, false, true)
-
-  defp code_line_style(theme_colors, amount, true, false) do
-    dim_amount = max(amount, 55)
-
-    case {Map.get(theme_colors, :panel), Map.get(theme_colors, :text)} do
-      {{_, _, _} = panel, {_, _, _} = text} ->
-        fade_style(dim_amount, %{
-          background_color: panel,
-          foreground_color: Theme.blend(text, panel, dim_amount / 100)
-        })
-
-      _ ->
-        code_line_style(theme_colors, dim_amount, false, true)
     end
   end
 
@@ -369,6 +378,63 @@ defmodule EasyBreezy.Layouts.CodeSlide do
   end
 
   defp ansi_panel_restore(_theme_colors), do: ""
+
+  defp ansi_line_style(theme_colors, amount, focus_active?, focused?)
+
+  defp ansi_line_style(theme_colors, amount, false, _focused?) do
+    ansi_style_from_colors(
+      blend_color(Map.get(theme_colors, :panel), Map.get(theme_colors, :bg), amount / 100),
+      blend_color(Map.get(theme_colors, :text), Map.get(theme_colors, :bg), amount / 100)
+    )
+  end
+
+  defp ansi_line_style(theme_colors, amount, true, true),
+    do: ansi_line_style(theme_colors, amount, false, true)
+
+  defp ansi_line_style(theme_colors, amount, true, false) do
+    dim_amount = max(amount, 55)
+
+    panel = blend_color(Map.get(theme_colors, :panel), Map.get(theme_colors, :bg), dim_amount / 100)
+
+    text =
+      case {Map.get(theme_colors, :text), Map.get(theme_colors, :panel)} do
+        {{_, _, _} = text, {_, _, _} = source_panel} ->
+          text
+          |> Theme.blend(source_panel, 0.55)
+          |> blend_color(Map.get(theme_colors, :bg), dim_amount / 100)
+
+        {text, _} ->
+          blend_color(text, Map.get(theme_colors, :bg), dim_amount / 100)
+      end
+
+    ansi_style_from_colors(panel, text)
+  end
+
+  defp ansi_style_from_colors(background, foreground) do
+    ansi_parts =
+      []
+      |> maybe_add_bg(background)
+      |> maybe_add_fg(foreground)
+
+    case ansi_parts do
+      [] -> ""
+      parts -> "\e[" <> Enum.join(parts, ";") <> "m"
+    end
+  end
+
+  defp maybe_add_bg(parts, {red, green, blue}),
+    do: parts ++ ["48", "2", Integer.to_string(red), Integer.to_string(green), Integer.to_string(blue)]
+
+  defp maybe_add_bg(parts, _color), do: parts
+
+  defp maybe_add_fg(parts, {red, green, blue}),
+    do: parts ++ ["38", "2", Integer.to_string(red), Integer.to_string(green), Integer.to_string(blue)]
+
+  defp maybe_add_fg(parts, _color), do: parts
+
+  defp blend_color({_, _, _} = color, {_, _, _} = bg, amount), do: Theme.blend(color, bg, amount)
+  defp blend_color({_, _, _} = color, _bg, _amount), do: color
+  defp blend_color(_color, _bg, _amount), do: nil
 
   defp line_end_restore(line, body_width, theme_colors) do
     if visible_width(line) > body_width do
