@@ -5,6 +5,7 @@ defmodule EasyBreezy.Layouts do
 
   import EasyBreezy.Layouts.BulletsSlide
   import EasyBreezy.Layouts.CodeSlide
+  import EasyBreezy.Layouts.LiveSlide
   import EasyBreezy.Layouts.PresenterSlide
   import EasyBreezy.Layouts.TitleSlide
   import EasyBreezy.Layouts.TwoColumnSlide
@@ -34,7 +35,13 @@ defmodule EasyBreezy.Layouts do
               code_language: nil,
               code_source: nil,
               code_path: nil,
-              code_focus_ranges: []
+              code_focus_ranges: [],
+              live_id: nil,
+              view: nil,
+              start_opts: [],
+              full_bleed: false,
+              persistent: false,
+              hosted_live: false
             },
             payload
           )
@@ -89,6 +96,19 @@ defmodule EasyBreezy.Layouts do
       source={@slide_payload.code_source}
       path={@slide_payload.code_path}
       focus_ranges={@slide_payload.code_focus_ranges}
+      body_width={@body_width}
+      body_height={@body_height}
+      render_context={@render_context}
+    />
+    <.live_slide
+      :if={@slide.layout == :live}
+      id={@slide_payload.live_id || "slide-live-#{@slide.id}"}
+      title={@slide_payload.title}
+      view={@slide_payload.view}
+      start_opts={@slide_payload.start_opts}
+      full_bleed={@slide_payload.full_bleed}
+      persistent={@slide_payload.persistent}
+      hosted_live={@slide_payload.hosted_live}
       body_width={@body_width}
       body_height={@body_height}
       render_context={@render_context}

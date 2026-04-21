@@ -1,5 +1,7 @@
 defmodule EasyBreezy.Examples.BreezeDeck do
   alias EasyBreezy.{Deck, Slide}
+  alias BreezeDoom.Engine.Zigler, as: DoomEngine
+  alias BreezeDoom.View, as: DoomView
 
   def deck do
     %Deck{
@@ -119,6 +121,24 @@ defmodule EasyBreezy.Examples.BreezeDeck do
           },
           steps: 2,
           transition: :slide_up
+        },
+        %Slide{
+          id: :doom,
+          title: "Doom in Breeze",
+          layout: :live,
+          payload: %{
+            title: "Doom in Breeze",
+            live_id: "doom-live-slide",
+            view: DoomView,
+            start_opts: [
+              engine: DoomEngine,
+              image_id: BreezeDoom.Kitty.default_image_id(),
+              refresh_ms: 33
+            ]
+          },
+          steps: 0,
+          transition: :slide,
+          disable_transitions?: true
         }
       ]
     }

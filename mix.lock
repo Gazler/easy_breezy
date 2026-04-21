@@ -4,8 +4,19 @@
   "file_system": {:hex, :file_system, "1.1.1", "31864f4685b0148f25bd3fbef2b1228457c0c89024ad67f7a81a3ffbc0bbad3a", [:mix], [], "hexpm", "7a15ff97dfe526aeefb090a7a9d3d03aa907e100e262a0f8f7746b78f8f87a5d"},
   "jason": {:hex, :jason, "1.4.4", "b9226785a9aa77b6857ca22832cffa5d5011a667207eb2a0ad56adb5db443b8a", [:mix], [{:decimal, "~> 1.0 or ~> 2.0", [hex: :decimal, repo: "hexpm", optional: true]}], "hexpm", "c5eb0cab91f094599f94d55bc63409236a8ec69a21a67814529e8d5f6cc90b3b"},
   "nimble_options": {:hex, :nimble_options, "1.1.1", "e3a492d54d85fc3fd7c5baf411d9d2852922f66e69476317787a7b2bb000a61b", [:mix], [], "hexpm", "821b2470ca9442c4b6984882fe9bb0389371b8ddec4d45a9504f00a66f650b44"},
+  "nimble_parsec": {:hex, :nimble_parsec, "1.4.2", "8efba0122db06df95bfaa78f791344a89352ba04baedd3849593bfce4d0dc1c6", [:mix], [], "hexpm", "4b21398942dda052b403bbe1da991ccd03a053668d147d53fb8c4e0efe09c973"},
+  "pegasus": {:hex, :pegasus, "0.2.6", "b4af6522326fbb2ffd1bb706e78ec05854fbcb4b03a7fe08f8db2e9de1d0be67", [:mix], [{:nimble_parsec, "~> 1.2", [hex: :nimble_parsec, repo: "hexpm", optional: false]}], "hexpm", "0ac159f0ccab7967cf90208327cc8a35788874814c8d78e19d47104d3fc049b9"},
+  "protoss": {:hex, :protoss, "1.1.0", "853533313989751c7da5b0e1ce71501a23f3dc41f128709478af40daccc6e959", [:mix], [], "hexpm", "c2f874383dd047fcfdf467b814dd33a208a4d24a467aef90d86185b41a0752ad"},
   "rustler": {:hex, :rustler, "0.37.3", "5f4e6634d43b26f0a69834dd1d3ed4e1710b022a053bf4a670220c9540c92602", [:mix], [{:jason, "~> 1.0", [hex: :jason, repo: "hexpm", optional: false]}], "hexpm", "a6872c6f53dcf00486d1e7f9e046e20e01bf1654bdacc4193016c2e8002b32a2"},
   "rustler_precompiled": {:hex, :rustler_precompiled, "0.9.0", "3a052eda09f3d2436364645cc1f13279cf95db310eb0c17b0d8f25484b233aa0", [:mix], [{:rustler, "~> 0.23", [hex: :rustler, repo: "hexpm", optional: true]}], "hexpm", "471d97315bd3bf7b64623418b3693eedd8e47de3d1cb79a0ac8f9da7d770d94c"},
   "telemetry": {:hex, :telemetry, "1.4.1", "ab6de178e2b29b58e8256b92b382ea3f590a47152ca3651ea857a6cae05ac423", [:rebar3], [], "hexpm", "2172e05a27531d3d31dd9782841065c50dd5c3c7699d95266b2edd54c2dafa1c"},
+<<<<<<< Updated upstream
   "termite": {:hex, :termite, "0.4.2", "22c784a3c634d6e6851b5994586d9aae198d7da0ec4534f493e2a718971373aa", [:mix], [], "hexpm", "15d77e59372bb556dc5f19c65af08aec8a2c91e97257a65dfef01444b39c555b"},
+=======
+  "terminal_doom": {:git, "https://github.com/cryptocode/terminal-doom.git", "1b1a7ed9cc78a5c1117582c08d206d94448cbb2f", []},
+  "termite": {:hex, :termite, "0.4.2", "22c784a3c634d6e6851b5994586d9aae198d7da0ec4534f493e2a718971373aa", [:mix], [], "hexpm", "15d77e59372bb556dc5f19c65af08aec8a2c91e97257a65dfef01444b39c555b"},
+  "zig_get": {:hex, :zig_get, "0.15.2", "a6ccaa894213839ba95615bf9be2b2c9268e37ab9547a2344830202cfd6d7cc0", [:mix], [], "hexpm", "e6b0028f2d5a8da791ff8037deff5b492784017d8d241e598377a24bd765f56f"},
+  "zig_parser": {:hex, :zig_parser, "0.6.0", "b1296c64bf5c2592de2eb4bc8bbf79d85b1d6a3ab444c443becd7af579d85681", [:mix], [{:pegasus, "~> 0.2.4", [hex: :pegasus, repo: "hexpm", optional: false]}], "hexpm", "bb7a1523b69f7f8f6b74ba5bf9dabc83f512c0cd67d9eebba1c501a529a2f95e"},
+  "zigler": {:hex, :zigler, "0.15.2", "d3e8c7b6d88be2eea72c341376b7e7b0aa36248e26d5798b580cad9815311559", [:mix], [{:protoss, "~> 1.0", [hex: :protoss, repo: "hexpm", optional: false]}, {:zig_get, "0.15.2", [hex: :zig_get, repo: "hexpm", optional: false]}, {:zig_parser, "~> 0.6", [hex: :zig_parser, repo: "hexpm", optional: false]}], "hexpm", "6bf96df41e281a70147e8826e439e24945f0222e08d058fc544da84f5c7ea8dd"},
+>>>>>>> Stashed changes
 }

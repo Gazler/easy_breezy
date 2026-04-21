@@ -6,6 +6,7 @@ defmodule EasyBreezy do
   def run(opts) do
     start_opts = start_opts(opts)
     reload_opts = reload_opts(opts)
+    Logger.configure(level: :info)
 
     Breeze.Example.run(
       [
@@ -26,7 +27,7 @@ defmodule EasyBreezy do
       |> start_opts()
       |> preserve_slideshow_state(context)
 
-    {:restart, [start_opts: refreshed]}
+    [start_opts: refreshed]
   end
 
   def refresh_server_opts(opts), do: refresh_server_opts(opts, %{})

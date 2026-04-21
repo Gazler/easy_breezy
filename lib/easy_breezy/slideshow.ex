@@ -170,7 +170,7 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_event(_, %{"key" => key}, term) when key in ["q", "Escape"] do
-    {:stop, term}
+    {:stop, maybe_cleanup_slide(term, current_slide(term.assigns))}
   end
 
   def handle_event(_, _, term), do: {:noreply, term}
@@ -244,7 +244,7 @@ defmodule EasyBreezy.Slideshow do
           else
             term
             |> assign(slide_index: next_index, step: 0)
-            |> maybe_delete_image_overlay(slide.id)
+            |> maybe_cleanup_slide(slide)
             |> maybe_restart_title_gradient(term.assigns)
           end
 
@@ -292,7 +292,7 @@ defmodule EasyBreezy.Slideshow do
           else
             term
             |> assign(slide_index: previous_index, step: previous_slide.steps)
-            |> maybe_delete_image_overlay(slide.id)
+            |> maybe_cleanup_slide(slide)
             |> maybe_restart_title_gradient(term.assigns)
           end
 
@@ -311,7 +311,7 @@ defmodule EasyBreezy.Slideshow do
 
     term
     |> assign(slide_index: slide_index, step: step, transition: nil)
-    |> maybe_delete_image_overlay(previous_slide.id)
+    |> maybe_cleanup_slide(previous_slide)
   end
 
   defp visible_position(%{
@@ -475,18 +475,36 @@ defmodule EasyBreezy.Slideshow do
     assign_theme(term, next_theme)
   end
 
-  defp maybe_delete_image_overlay(%{terminal: %{adapter: nil}} = term, _previous_slide_id),
+  defp maybe_cleanup_slide(%{terminal: %{adapter: nil}} = term, _slide),
     do: term
 
-  defp maybe_delete_image_overlay(term, :image) do
-    %{
-      term
-      | terminal:
-          Termite.Terminal.write(term.terminal, EasyBreezy.Slideshow.KittyImage.delete_command())
-    }
+  defp maybe_cleanup_slide(term, %{id: :image}) do
+    maybe_write_cleanup_payload(term, EasyBreezy.Slideshow.KittyImage.delete_command())
+  end
+
+  defp maybe_cleanup_slide(term, %{payload: payload}) when is_map(payload) do
+    case Map.get(payload, :cleanup_payload) do
+      nil -> term
+      cleanup_payload -> maybe_write_cleanup_payload(term, cleanup_payload)
+    end
+  end
+
+  defp maybe_cleanup_slide(term, _slide), do: term
+
+  defp maybe_write_cleanup_payload(term, cleanup_payload) when is_function(cleanup_payload, 0) do
+    cleanup_payload
+    |> then(& &1.())
+    |> then(&maybe_write_cleanup_payload(term, &1))
+  end
+
+  defp maybe_write_cleanup_payload(term, cleanup_payload) when cleanup_payload in [nil, ""], do: term
+
+  defp maybe_write_cleanup_payload(term, cleanup_payload) when is_binary(cleanup_payload) do
+    %{term | terminal: Termite.Terminal.write(term.terminal, cleanup_payload)}
   rescue
     _ -> term
   end
 
-  defp maybe_delete_image_overlay(term, _previous_slide_id), do: term
+  defp maybe_write_cleanup_payload(term, _cleanup_payload), do: term
+
 end
