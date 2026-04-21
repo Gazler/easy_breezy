@@ -20,6 +20,10 @@ defmodule EasyBreezy.Typography do
   attr(:style, :any, default: nil)
   attr(:theme_colors, :map, default: %{})
   attr(:background, :any, default: nil)
+  attr(:gradient_from, :any, default: nil)
+  attr(:gradient_to, :any, default: nil)
+  attr(:id, :string, default: nil)
+  attr(:implicit, :any, default: nil)
   attr(:rest, :global)
   slot(:inner_block, required: true)
 
@@ -34,15 +38,37 @@ defmodule EasyBreezy.Typography do
       |> String.upcase()
       |> bannerize()
 
-    {gradient, class} = parse_gradient_class(assigns[:class])
+    {gradient, class} =
+      parse_gradient_class(assigns[:class], assigns[:gradient_from], assigns[:gradient_to])
+
+    gradient_direction =
+      case gradient || gradient_direction_from_class(assigns[:class]) do
+        %{direction: direction} -> direction
+        direction when is_binary(direction) -> direction
+        _ -> "text-gradient-to-r"
+      end
 
     assigns =
       assigns
       |> assign(class: merge_class("bold", class))
       |> assign(content: maybe_apply_gradient(source, gradient, theme_colors, background))
+      |> assign(gradient_direction: gradient_direction)
+      |> assign(gradient_source: source)
 
     ~H"""
-    <box class={@class} style={Breeze.Blocks.inline_style(assigns)} {@rest}>{@content}</box>
+    <box
+      class={@class}
+      id={@id}
+      implicit={@implicit}
+      style={Breeze.Blocks.inline_style(assigns)}
+      gradient_direction={@gradient_direction}
+      gradient_theme_colors={@theme_colors}
+      gradient_background={@background}
+      gradient_source={@gradient_source}
+      {@rest}
+    >
+      {@content}
+    </box>
     """
   end
 
@@ -149,10 +175,13 @@ defmodule EasyBreezy.Typography do
     |> IO.iodata_to_binary()
   end
 
-  defp parse_gradient_class(nil), do: {nil, nil}
-  defp parse_gradient_class(""), do: {nil, nil}
+  defp parse_gradient_class(nil, gradient_from, gradient_to),
+    do: {build_explicit_gradient(nil, gradient_from, gradient_to), nil}
 
-  defp parse_gradient_class(class) when is_binary(class) do
+  defp parse_gradient_class("", gradient_from, gradient_to),
+    do: {build_explicit_gradient(nil, gradient_from, gradient_to), nil}
+
+  defp parse_gradient_class(class, gradient_from, gradient_to) when is_binary(class) do
     tokens = String.split(class, ~r/\s+/, trim: true)
 
     direction =
@@ -186,15 +215,30 @@ defmodule EasyBreezy.Typography do
       end
 
     gradient =
-      case {direction, from, to} do
-        {nil, _, _} -> nil
-        {_, nil, _} -> nil
-        {_, _, nil} -> nil
-        _ -> %{direction: direction, from: from, to: to}
-      end
+      build_explicit_gradient(direction, gradient_from, gradient_to) ||
+        case {direction, from, to} do
+          {nil, _, _} -> nil
+          {_, nil, _} -> nil
+          {_, _, nil} -> nil
+          _ -> %{direction: direction, from: from, to: to}
+        end
 
     {gradient, box_class}
   end
+
+  defp gradient_direction_from_class(class) when is_binary(class) do
+    class
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.find(&(&1 in @gradient_directions))
+  end
+
+  defp gradient_direction_from_class(_class), do: nil
+
+  defp build_explicit_gradient(direction, {_, _, _} = gradient_from, {_, _, _} = gradient_to) do
+    %{direction: direction || "text-gradient-to-r", from: gradient_from, to: gradient_to}
+  end
+
+  defp build_explicit_gradient(_direction, _gradient_from, _gradient_to), do: nil
 
   defp maybe_apply_gradient(text, nil, _theme_colors, _background), do: text
 
@@ -203,7 +247,7 @@ defmodule EasyBreezy.Typography do
          {:ok, to} <- resolve_gradient_color(gradient.to, theme_colors),
          true <- rgb_color?(from),
          true <- rgb_color?(to) do
-      apply_gradient(text, gradient.direction, from, to, background)
+      gradient(text, gradient.direction, from, to, background)
     else
       _ -> text
     end
@@ -223,6 +267,8 @@ defmodule EasyBreezy.Typography do
       _ -> {:error, :unknown_color}
     end
   end
+
+  defp resolve_gradient_color({_, _, _} = color, _theme_colors), do: {:ok, color}
 
   defp fetch_theme_color(theme_colors, key) do
     case Map.get(theme_colors, key) do
@@ -249,22 +295,22 @@ defmodule EasyBreezy.Typography do
 
   defp rgb_color?(_color), do: false
 
-  defp apply_gradient(text, "text-gradient-to-b", from, to, background) do
+  def gradient(text, "text-gradient-to-b", from, to, background) do
     text
     |> String.split("\n", trim: false)
     |> apply_line_gradient(from, to, background)
   end
 
-  defp apply_gradient(text, "text-gradient-to-t", from, to, background) do
+  def gradient(text, "text-gradient-to-t", from, to, background) do
     text
     |> String.split("\n", trim: false)
     |> apply_line_gradient(to, from, background)
   end
 
-  defp apply_gradient(text, "text-gradient-to-l", from, to, background),
+  def gradient(text, "text-gradient-to-l", from, to, background),
     do: apply_character_gradient(text, to, from, background)
 
-  defp apply_gradient(text, _direction, from, to, background),
+  def gradient(text, _direction, from, to, background),
     do: apply_character_gradient(text, from, to, background)
 
   defp apply_line_gradient(lines, from, to, background) do

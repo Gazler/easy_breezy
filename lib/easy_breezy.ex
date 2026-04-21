@@ -26,14 +26,14 @@ defmodule EasyBreezy do
       |> start_opts()
       |> preserve_slideshow_state(context)
 
-    {:restart, [start_opts: refreshed]}
+    [start_opts: refreshed]
   end
 
   def refresh_server_opts(opts), do: refresh_server_opts(opts, %{})
 
   defp start_opts(opts) do
     opts
-    |> Keyword.take([:theme, :presenter, :themes])
+    |> Keyword.take([:alt_screen, :theme, :presenter, :themes])
     |> Keyword.put(:deck, resolve_deck(Keyword.fetch!(opts, :deck)))
   end
 

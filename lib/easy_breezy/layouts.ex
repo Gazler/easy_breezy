@@ -43,6 +43,7 @@ defmodule EasyBreezy.Layouts do
     ~H"""
     <.title_slide
       :if={@slide.layout == :title}
+      slide_id={@slide.id}
       title={@slide_payload.title}
       subtitle={@slide_payload.subtitle}
       speaker={@slide_payload.speaker}

@@ -5,6 +5,7 @@ defmodule EasyBreezy.Layouts.TitleSlide do
 
   import EasyBreezy.Typography
 
+  attr(:slide_id, :any, default: nil)
   attr(:title, :string, required: true)
   attr(:subtitle, :string, default: nil)
   attr(:speaker, :string, default: nil)
@@ -17,11 +18,18 @@ defmodule EasyBreezy.Layouts.TitleSlide do
     assigns =
       assigns
       |> assign(theme_colors: theme_colors)
+      |> assign(
+        title_gradient_id:
+          "title-gradient-" <>
+            Integer.to_string(:erlang.phash2(assigns.slide_id || assigns.title))
+      )
 
     ~H"""
     <box class="grid grid-cols-1 grid-rows-3 width-full height-full">
       <box>
         <.h1
+          id={@title_gradient_id}
+          implicit={EasyBreezy.Implicit.TitleGradient}
           class="text-gradient-to-b from-primary to-secondary"
           theme_colors={@theme_colors}
           background={Map.get(@theme_colors, :surface)}

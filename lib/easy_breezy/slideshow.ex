@@ -14,7 +14,10 @@ defmodule EasyBreezy.Slideshow do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
     {theme_name, theme} = resolve_theme(Keyword.get(opts, :theme, :nebula))
 
-    term = put_theme(term, theme)
+    term =
+      term
+      |> maybe_enter_alt_screen(opts)
+      |> put_theme(theme)
 
     term =
       term
@@ -34,7 +37,6 @@ defmodule EasyBreezy.Slideshow do
       )
       |> assign_code_theme(theme_name)
       |> assign_theme_colors()
-      |> assign_title_gradient(theme_name)
 
     {:ok, clamp_position(term)}
   end
@@ -57,8 +59,6 @@ defmodule EasyBreezy.Slideshow do
       |> assign(
         render_context: %{
           theme_colors: assigns.theme_colors,
-          title_gradient_start: assigns.title_gradient_start,
-          title_gradient_end: assigns.title_gradient_end,
           code_theme: assigns.code_theme
         }
       )
@@ -126,13 +126,20 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_event(_, %{"key" => "Home"}, term) do
-    {:noreply, clamp_position(assign(term, slide_index: 0, step: 0))}
+    {:noreply,
+     term
+     |> assign(slide_index: 0, step: 0)
+     |> clamp_position()}
   end
 
   def handle_event(_, %{"key" => "End"}, term) do
     last_index = length(term.assigns.deck.slides) - 1
     last_slide = Enum.at(term.assigns.deck.slides, last_index)
-    {:noreply, clamp_position(assign(term, slide_index: last_index, step: last_slide.steps))}
+
+    {:noreply,
+     term
+     |> assign(slide_index: last_index, step: last_slide.steps)
+     |> clamp_position()}
   end
 
   def handle_event(_, %{"key" => "p"}, term) do
@@ -166,7 +173,8 @@ defmodule EasyBreezy.Slideshow do
 
     if frame >= transition.frames do
       {:noreply,
-       assign(term,
+       term
+       |> assign(
          slide_index: transition.to_index,
          step: transition.to_step,
          transition: nil
@@ -212,6 +220,18 @@ defmodule EasyBreezy.Slideshow do
       end
     end
   end
+
+  defp maybe_enter_alt_screen(term, opts) do
+    if Keyword.get(opts, :alt_screen, true) and live_terminal?(term.terminal) do
+      %{term | terminal: Termite.Screen.alt_screen(term.terminal)}
+    else
+      term
+    end
+  end
+
+  defp live_terminal?(%Termite.Terminal{adapter: nil}), do: false
+  defp live_terminal?(%Termite.Terminal{}), do: true
+  defp live_terminal?(_terminal), do: false
 
   defp retreat(term) do
     if term.assigns.transition do
@@ -296,7 +316,6 @@ defmodule EasyBreezy.Slideshow do
     )
     |> assign_code_theme(theme_name)
     |> assign_theme_colors()
-    |> assign_title_gradient(theme_name)
   end
 
   defp assign_code_theme(term, theme_name) do
@@ -317,19 +336,6 @@ defmodule EasyBreezy.Slideshow do
         stroke: Theme.color(term.theme, :stroke)
       }
     )
-  end
-
-  defp assign_title_gradient(term, theme_name) do
-    primary = Theme.color(term.theme, :primary)
-
-    {start_color, end_color} =
-      if theme_name == :system16 do
-        {primary, primary}
-      else
-        {primary, Theme.color(term.theme, :secondary)}
-      end
-
-    assign(term, title_gradient_start: start_color, title_gradient_end: end_color)
   end
 
   defp resolve_theme(:system16), do: {:system16, :system16}
