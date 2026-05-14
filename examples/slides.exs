@@ -13,7 +13,8 @@ defmodule EasyBreezy.Examples.BreezeDeck do
             title: "Breeze",
             subtitle: "LiveView-style terminal apps in Elixir",
             speaker: "Gazler",
-            footer: "Terminal-native slides"
+            footer: "Terminal-native slides",
+            notes: "Rememeber to allow SSH access with a hex color, guess the colors."
           },
           steps: 0,
           transition: :slide

@@ -6,18 +6,17 @@ defmodule EasyBreezy.Slideshow do
   import EasyBreezy.Transitions
   alias Breeze.Theme
 
-  @themes [:system16, :system, :nebula, :catppuccin, :dracula, :gruvbox, :nord, :solarized_light]
+  @themes Theme.default_cycle()
 
   def mount(opts, term) do
     deck = Keyword.fetch!(opts, :deck)
 
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
-    {theme_name, theme} = resolve_theme(Keyword.get(opts, :theme, :nebula))
 
     term =
       term
       |> maybe_enter_alt_screen(opts)
-      |> put_theme(theme)
+      |> Breeze.View.switch_theme(Keyword.get(opts, :theme, :nebula))
 
     term =
       term
@@ -29,14 +28,15 @@ defmodule EasyBreezy.Slideshow do
         screen_width: screen_width,
         screen_height: screen_height,
         presenter?: Keyword.get(opts, :presenter, false),
+        presenter_mode: Keyword.get(opts, :presenter_mode, :single),
+        presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
+        presenter_subscribers: MapSet.new(),
         themes: Keyword.get(opts, :themes, @themes),
-        started_at_ms: System.monotonic_time(:millisecond),
-        theme_name: theme_name,
-        actual_theme_mode: term.theme.mode,
-        theme_status: Theme.probe_status(term.theme) || :ready
+        started_at_ms: System.monotonic_time(:millisecond)
       )
-      |> assign_code_theme(theme_name)
-      |> assign_theme_colors()
+      |> assign_theme_context()
+      |> maybe_register_presentation()
+      |> maybe_publish_presentation_soon()
 
     {:ok, clamp_position(term)}
   end
@@ -59,7 +59,8 @@ defmodule EasyBreezy.Slideshow do
       |> assign(
         render_context: %{
           theme_colors: assigns.theme_colors,
-          code_theme: assigns.code_theme
+          code_theme: assigns.code_theme,
+          animate_title_gradient?: is_nil(assigns.transition)
         }
       )
 
@@ -118,18 +119,19 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_event(_, %{"key" => key}, term) when key in [" ", "ArrowRight", "l", "PageDown"] do
-    {:noreply, advance(term)}
+    {:noreply, term |> advance() |> maybe_publish_presentation_soon()}
   end
 
   def handle_event(_, %{"key" => key}, term) when key in ["ArrowLeft", "h", "PageUp"] do
-    {:noreply, retreat(term)}
+    {:noreply, term |> retreat() |> maybe_publish_presentation_soon()}
   end
 
   def handle_event(_, %{"key" => "Home"}, term) do
     {:noreply,
      term
      |> assign(slide_index: 0, step: 0)
-     |> clamp_position()}
+     |> clamp_position()
+     |> maybe_publish_presentation_soon()}
   end
 
   def handle_event(_, %{"key" => "End"}, term) do
@@ -139,7 +141,8 @@ defmodule EasyBreezy.Slideshow do
     {:noreply,
      term
      |> assign(slide_index: last_index, step: last_slide.steps)
-     |> clamp_position()}
+     |> clamp_position()
+     |> maybe_publish_presentation_soon()}
   end
 
   def handle_event(_, %{"key" => "p"}, term) do
@@ -147,11 +150,19 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_event(_, %{"ctrlKey" => true, "key" => key}, term) when key in ["t", "T"] do
-    {:noreply, cycle_theme(term)}
+    {:noreply,
+     term
+     |> Breeze.View.cycle_theme(theme_cycle_opts(term))
+     |> assign_theme_context()
+     |> maybe_publish_presentation_soon()}
   end
 
   def handle_event(_, %{"key" => "\x14"}, term) do
-    {:noreply, cycle_theme(term)}
+    {:noreply,
+     term
+     |> Breeze.View.cycle_theme(theme_cycle_opts(term))
+     |> assign_theme_context()
+     |> maybe_publish_presentation_soon()}
   end
 
   def handle_event(_, %{"key" => key}, term) when key in ["q", "Escape"] do
@@ -162,7 +173,38 @@ defmodule EasyBreezy.Slideshow do
 
   def handle_info(:resize, term) do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
-    {:noreply, assign(term, screen_width: screen_width, screen_height: screen_height)}
+
+    {:noreply,
+     term
+     |> assign(screen_width: screen_width, screen_height: screen_height)
+     |> maybe_publish_presentation_soon()}
+  end
+
+  def handle_info(:publish_presentation_state, term) do
+    maybe_publish_presentation(term)
+    {:noreply, term}
+  end
+
+  def handle_info({:easy_breezy_presenter_subscribe, pid}, term) when is_pid(pid) do
+    Process.monitor(pid)
+
+    term =
+      update_in(term.assigns.presenter_subscribers, fn subscribers ->
+        subscribers
+        |> ensure_map_set()
+        |> MapSet.put(pid)
+      end)
+
+    maybe_publish_presentation(term)
+    {:noreply, term}
+  end
+
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, term) when is_pid(pid) do
+    {:noreply, remove_presenter_subscriber(term, pid)}
+  end
+
+  def handle_info({:easy_breezy_presenter_command, _pid, command}, term) do
+    {:noreply, handle_presenter_command(command, term)}
   end
 
   def handle_info(:transition_tick, %{assigns: %{transition: nil}} = term), do: {:noreply, term}
@@ -178,7 +220,8 @@ defmodule EasyBreezy.Slideshow do
          slide_index: transition.to_index,
          step: transition.to_step,
          transition: nil
-       )}
+       )
+       |> maybe_publish_presentation_soon()}
     else
       Process.send_after(self(), :transition_tick, transition.interval_ms)
       {:noreply, assign(term, transition: %{transition | frame: frame})}
@@ -232,6 +275,87 @@ defmodule EasyBreezy.Slideshow do
   defp live_terminal?(%Termite.Terminal{adapter: nil}), do: false
   defp live_terminal?(%Termite.Terminal{}), do: true
   defp live_terminal?(_terminal), do: false
+
+  defp maybe_register_presentation(%{assigns: %{presenter_mode: :presentation}} = term) do
+    EasyBreezy.PresenterSync.register(term.assigns.presenter_sync_name)
+    term
+  end
+
+  defp maybe_register_presentation(term), do: term
+
+  defp maybe_publish_presentation_soon(%{assigns: %{presenter_mode: :presentation}} = term) do
+    send(self(), :publish_presentation_state)
+    term
+  end
+
+  defp maybe_publish_presentation_soon(term), do: term
+
+  defp maybe_publish_presentation(%{assigns: %{presenter_mode: :presentation}} = term) do
+    EasyBreezy.PresenterSync.publish(
+      ensure_map_set(term.assigns.presenter_subscribers),
+      presentation_payload(term.assigns)
+    )
+  end
+
+  defp maybe_publish_presentation(_term), do: :ok
+
+  defp presentation_payload(assigns) do
+    %{
+      deck: assigns.deck,
+      slide_index: assigns.slide_index,
+      step: assigns.step,
+      screen_width: assigns.screen_width,
+      screen_height: assigns.screen_height,
+      presenter?: assigns.presenter?,
+      started_at_ms: assigns.started_at_ms,
+      theme_name: assigns.theme_name,
+      actual_theme_mode: assigns.actual_theme_mode,
+      theme_status: assigns.theme_status
+    }
+  end
+
+  defp remove_presenter_subscriber(term, pid) do
+    update_in(term.assigns.presenter_subscribers, fn subscribers ->
+      subscribers
+      |> ensure_map_set()
+      |> MapSet.delete(pid)
+    end)
+  end
+
+  defp ensure_map_set(%MapSet{} = set), do: set
+  defp ensure_map_set(_value), do: MapSet.new()
+
+  defp handle_presenter_command(:next, term),
+    do: term |> advance() |> maybe_publish_presentation_soon()
+
+  defp handle_presenter_command(:previous, term),
+    do: term |> retreat() |> maybe_publish_presentation_soon()
+
+  defp handle_presenter_command(:home, term) do
+    term
+    |> assign(slide_index: 0, step: 0)
+    |> clamp_position()
+    |> maybe_publish_presentation_soon()
+  end
+
+  defp handle_presenter_command(:end, term) do
+    last_index = length(term.assigns.deck.slides) - 1
+    last_slide = Enum.at(term.assigns.deck.slides, last_index)
+
+    term
+    |> assign(slide_index: last_index, step: last_slide.steps)
+    |> clamp_position()
+    |> maybe_publish_presentation_soon()
+  end
+
+  defp handle_presenter_command(:cycle_theme, term) do
+    term
+    |> Breeze.View.cycle_theme(theme_cycle_opts(term))
+    |> assign_theme_context()
+    |> maybe_publish_presentation_soon()
+  end
+
+  defp handle_presenter_command(_command, term), do: term
 
   defp retreat(term) do
     if term.assigns.transition do
@@ -305,14 +429,13 @@ defmodule EasyBreezy.Slideshow do
     trunc((slide_index + 1) / total * 100)
   end
 
-  defp assign_theme(term, theme_key) do
-    {theme_name, theme} = resolve_theme(theme_key)
-    term = put_theme(term, theme)
+  defp assign_theme_context(term) do
+    theme_name = current_breeze_theme_name(term) || Map.get(term.assigns, :theme_name) || :nebula
 
     assign(term,
       theme_name: theme_name,
-      actual_theme_mode: term.theme.mode,
-      theme_status: Theme.probe_status(term.theme) || :ready
+      actual_theme_mode: current_breeze_theme_mode(term) || term.theme.mode,
+      theme_status: current_breeze_theme_status(term) || Theme.probe_status(term.theme) || :ready
     )
     |> assign_code_theme(theme_name)
     |> assign_theme_colors()
@@ -338,42 +461,27 @@ defmodule EasyBreezy.Slideshow do
     )
   end
 
-  defp resolve_theme(:system16), do: {:system16, :system16}
-  defp resolve_theme(:system), do: {:system, :system}
-  defp resolve_theme(:nebula), do: {:nebula, Theme.builtin(:nebula)}
-  defp resolve_theme(:catppuccin), do: {:catppuccin, Theme.builtin(:catppuccin)}
-  defp resolve_theme(:dracula), do: {:dracula, Theme.builtin(:dracula)}
-  defp resolve_theme(:gruvbox), do: {:gruvbox, Theme.builtin(:gruvbox)}
-  defp resolve_theme(:nord), do: {:nord, Theme.builtin(:nord)}
-  defp resolve_theme(:solarized_light), do: {:solarized_light, Theme.builtin(:solarized, :light)}
-  defp resolve_theme(_), do: resolve_theme(:nebula)
-
-  defp cycle_theme(term) do
-    current_theme = term.assigns.theme_name
-    themes = term.assigns.themes || @themes
-
-    next_theme =
-      themes
-      |> Enum.find_index(&(&1 == current_theme))
-      |> case do
-        nil -> hd(themes)
-        index -> Enum.at(themes, rem(index + 1, length(themes)))
-      end
-
-    assign_theme(term, next_theme)
+  defp current_breeze_theme_name(term) do
+    get_in(term.assigns, [:breeze, :theme, :name])
   end
 
-  defp maybe_delete_image_overlay(%{terminal: %{adapter: nil}} = term, _previous_slide_id),
-    do: term
+  defp current_breeze_theme_mode(term) do
+    get_in(term.assigns, [:breeze, :theme, :actual_mode])
+  end
+
+  defp current_breeze_theme_status(term) do
+    get_in(term.assigns, [:breeze, :theme, :status])
+  end
+
+  defp theme_cycle_opts(term) do
+    [
+      themes: term.assigns.themes || @themes,
+      current: current_breeze_theme_name(term) || term.assigns.theme_name
+    ]
+  end
 
   defp maybe_delete_image_overlay(term, :image) do
-    %{
-      term
-      | terminal:
-          Termite.Terminal.write(term.terminal, EasyBreezy.Slideshow.KittyImage.delete_command())
-    }
-  rescue
-    _ -> term
+    EasyBreezy.Slideshow.KittyImage.delete_overlay(term)
   end
 
   defp maybe_delete_image_overlay(term, _previous_slide_id), do: term

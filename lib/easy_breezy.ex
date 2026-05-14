@@ -6,10 +6,11 @@ defmodule EasyBreezy do
   def run(opts) do
     start_opts = start_opts(opts)
     reload_opts = reload_opts(opts)
+    presenter_mode = presenter_mode(opts)
 
     Breeze.Example.run(
       [
-        view: EasyBreezy.Slideshow,
+        view: view_for_presenter_mode(presenter_mode),
         start_opts: start_opts,
         reload: reload_opts,
         hide_cursor: Keyword.get(opts, :hide_cursor, true),
@@ -33,8 +34,48 @@ defmodule EasyBreezy do
 
   defp start_opts(opts) do
     opts
-    |> Keyword.take([:alt_screen, :theme, :presenter, :themes])
+    |> Keyword.take([
+      :alt_screen,
+      :theme,
+      :presenter,
+      :presenter_mode,
+      :presenter_sync_name,
+      :sync_name,
+      :presenter_sync_node,
+      :sync_node,
+      :themes
+    ])
+    |> Keyword.put(:presenter_mode, presenter_mode(opts))
+    |> maybe_put_env(:sync_node, "EASY_BREEZY_SYNC_NODE")
     |> Keyword.put(:deck, resolve_deck(Keyword.fetch!(opts, :deck)))
+  end
+
+  defp presenter_mode(opts) do
+    case Keyword.get(opts, :presenter_mode) || env_presenter_mode() ||
+           Keyword.get(opts, :presenter, :single) do
+      :presenter -> :presenter
+      :presentation -> :presentation
+      _mode -> :single
+    end
+  end
+
+  defp view_for_presenter_mode(:presenter), do: EasyBreezy.PresenterView
+  defp view_for_presenter_mode(_mode), do: EasyBreezy.Slideshow
+
+  defp env_presenter_mode do
+    case System.get_env("EASY_BREEZY_PRESENTER_MODE") do
+      "presenter" -> :presenter
+      "presentation" -> :presentation
+      "slides" -> :presentation
+      _value -> nil
+    end
+  end
+
+  defp maybe_put_env(opts, key, env_name) do
+    case {Keyword.has_key?(opts, key), System.get_env(env_name)} do
+      {false, value} when is_binary(value) and value != "" -> Keyword.put(opts, key, value)
+      _ -> opts
+    end
   end
 
   defp reload_opts(opts) do

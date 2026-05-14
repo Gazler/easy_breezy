@@ -87,5 +87,13 @@ defmodule EasyBreezy.Slideshow.KittyImage do
     "\e_Ga=d,d=I,i=#{@image_id},q=2\e\\"
   end
 
+  def delete_overlay(%{terminal: %{adapter: nil}} = term), do: term
+
+  def delete_overlay(term) do
+    %{term | terminal: Termite.Terminal.write(term.terminal, delete_command())}
+  rescue
+    _ -> term
+  end
+
   defp truthy?(value), do: value in [true, "true", "1", 1]
 end
