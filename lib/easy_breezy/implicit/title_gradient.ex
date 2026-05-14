@@ -26,7 +26,7 @@ defmodule EasyBreezy.Implicit.TitleGradient do
       content =
         EasyBreezy.Typography.gradient(content, state.direction, from, to, state.background)
 
-      {:ok, %{box | content: content}, overlays: line_overlays(content, layout)}
+      {:ok, box, overlays: line_overlays(content, layout)}
     else
       _ -> box
     end
@@ -85,6 +85,7 @@ defmodule EasyBreezy.Implicit.TitleGradient do
         x: left,
         y: top + index,
         content: line <> Termite.Style.reset_code(),
+        patch_only: true,
         no_wrap: true
       }
     end)

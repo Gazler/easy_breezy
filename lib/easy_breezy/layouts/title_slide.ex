@@ -14,14 +14,25 @@ defmodule EasyBreezy.Layouts.TitleSlide do
 
   def title_slide(assigns) do
     theme_colors = Map.get(assigns.render_context, :theme_colors, %{})
+    animate_title_gradient? = Map.get(assigns.render_context, :animate_title_gradient?, true)
 
     assigns =
       assigns
       |> assign(theme_colors: theme_colors)
+      |> assign(animate_title_gradient?: animate_title_gradient?)
+      |> assign(
+        title_gradient_implicit:
+          if(animate_title_gradient?, do: EasyBreezy.Implicit.TitleGradient, else: nil)
+      )
       |> assign(
         title_gradient_id:
           "title-gradient-" <>
             Integer.to_string(:erlang.phash2(assigns.slide_id || assigns.title))
+      )
+      |> assign(
+        footer_shimmer_id:
+          "footer-shimmer-" <>
+            Integer.to_string(:erlang.phash2({assigns.slide_id, assigns.footer}))
       )
 
     ~H"""
@@ -29,7 +40,7 @@ defmodule EasyBreezy.Layouts.TitleSlide do
       <box>
         <.h1
           id={@title_gradient_id}
-          implicit={EasyBreezy.Implicit.TitleGradient}
+          implicit={@title_gradient_implicit}
           class="text-gradient-to-b from-primary to-secondary"
           theme_colors={@theme_colors}
           background={Map.get(@theme_colors, :surface)}
@@ -44,7 +55,15 @@ defmodule EasyBreezy.Layouts.TitleSlide do
         <box :if={@speaker}>by {@speaker}</box>
       </box>
       <box class="text-center">
-        <box class="text-muted">{@footer}</box>
+        <.text
+          :if={@footer}
+          id={@footer_shimmer_id}
+          class="text-shimmer from-muted to-text"
+          theme_colors={@theme_colors}
+          background={Map.get(@theme_colors, :surface)}
+        >
+          {@footer}
+        </.text>
       </box>
     </box>
     """

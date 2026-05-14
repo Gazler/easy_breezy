@@ -15,6 +15,7 @@ defmodule EasyBreezy.Typography do
   alias Breeze.Theme
 
   @gradient_directions ~w(text-gradient-to-r text-gradient-to-l text-gradient-to-b text-gradient-to-t)
+  @shimmer_classes ~w(text-shimmer)
 
   attr(:class, :string, default: nil)
   attr(:style, :any, default: nil)
@@ -22,6 +23,62 @@ defmodule EasyBreezy.Typography do
   attr(:background, :any, default: nil)
   attr(:gradient_from, :any, default: nil)
   attr(:gradient_to, :any, default: nil)
+  attr(:shimmer_base, :any, default: nil)
+  attr(:shimmer_highlight, :any, default: nil)
+  attr(:id, :string, default: nil)
+  attr(:implicit, :any, default: nil)
+  attr(:rest, :global)
+  slot(:inner_block, required: true)
+
+  def text(assigns) do
+    theme_colors = Map.get(assigns, :theme_colors, %{})
+    background = Map.get(assigns, :background)
+    source = render_slot_text(assigns)
+
+    {_gradient, shimmer, class} =
+      parse_text_effect_class(
+        assigns[:class],
+        nil,
+        nil,
+        assigns[:shimmer_base],
+        assigns[:shimmer_highlight]
+      )
+
+    assigns =
+      assigns
+      |> assign(class: class)
+      |> assign(content: maybe_apply_shimmer(source, shimmer, theme_colors, background, 0.0))
+      |> assign(implicit: maybe_shimmer_implicit(assigns[:implicit], shimmer))
+      |> assign(shimmer_source: source)
+      |> assign(shimmer_base: shimmer && shimmer.base)
+      |> assign(shimmer_highlight: shimmer && shimmer.highlight)
+
+    ~H"""
+    <box
+      class={@class}
+      id={@id}
+      implicit={@implicit}
+      style={Breeze.Blocks.inline_style(assigns)}
+      shimmer_theme_colors={@theme_colors}
+      shimmer_background={@background}
+      shimmer_source={@shimmer_source}
+      shimmer_base={@shimmer_base}
+      shimmer_highlight={@shimmer_highlight}
+      {@rest}
+    >
+      {@content}
+    </box>
+    """
+  end
+
+  attr(:class, :string, default: nil)
+  attr(:style, :any, default: nil)
+  attr(:theme_colors, :map, default: %{})
+  attr(:background, :any, default: nil)
+  attr(:gradient_from, :any, default: nil)
+  attr(:gradient_to, :any, default: nil)
+  attr(:shimmer_base, :any, default: nil)
+  attr(:shimmer_highlight, :any, default: nil)
   attr(:id, :string, default: nil)
   attr(:implicit, :any, default: nil)
   attr(:rest, :global)
@@ -38,8 +95,14 @@ defmodule EasyBreezy.Typography do
       |> String.upcase()
       |> bannerize()
 
-    {gradient, class} =
-      parse_gradient_class(assigns[:class], assigns[:gradient_from], assigns[:gradient_to])
+    {gradient, shimmer, class} =
+      parse_text_effect_class(
+        assigns[:class],
+        assigns[:gradient_from],
+        assigns[:gradient_to],
+        assigns[:shimmer_base],
+        assigns[:shimmer_highlight]
+      )
 
     gradient_direction =
       case gradient || gradient_direction_from_class(assigns[:class]) do
@@ -51,9 +114,15 @@ defmodule EasyBreezy.Typography do
     assigns =
       assigns
       |> assign(class: merge_class("bold", class))
-      |> assign(content: maybe_apply_gradient(source, gradient, theme_colors, background))
+      |> assign(
+        content: maybe_apply_text_effect(source, gradient, shimmer, theme_colors, background)
+      )
+      |> assign(implicit: maybe_shimmer_implicit(assigns[:implicit], shimmer))
       |> assign(gradient_direction: gradient_direction)
       |> assign(gradient_source: source)
+      |> assign(shimmer_source: source)
+      |> assign(shimmer_base: shimmer && shimmer.base)
+      |> assign(shimmer_highlight: shimmer && shimmer.highlight)
 
     ~H"""
     <box
@@ -65,6 +134,11 @@ defmodule EasyBreezy.Typography do
       gradient_theme_colors={@theme_colors}
       gradient_background={@background}
       gradient_source={@gradient_source}
+      shimmer_theme_colors={@theme_colors}
+      shimmer_background={@background}
+      shimmer_source={@shimmer_source}
+      shimmer_base={@shimmer_base}
+      shimmer_highlight={@shimmer_highlight}
       {@rest}
     >
       {@content}
@@ -175,13 +249,18 @@ defmodule EasyBreezy.Typography do
     |> IO.iodata_to_binary()
   end
 
-  defp parse_gradient_class(nil, gradient_from, gradient_to),
-    do: {build_explicit_gradient(nil, gradient_from, gradient_to), nil}
+  defp parse_text_effect_class(nil, gradient_from, gradient_to, shimmer_base, shimmer_highlight) do
+    shimmer = build_explicit_shimmer(shimmer_base, shimmer_highlight)
 
-  defp parse_gradient_class("", gradient_from, gradient_to),
-    do: {build_explicit_gradient(nil, gradient_from, gradient_to), nil}
+    {unless(shimmer, do: build_explicit_gradient(nil, gradient_from, gradient_to)), shimmer, nil}
+  end
 
-  defp parse_gradient_class(class, gradient_from, gradient_to) when is_binary(class) do
+  defp parse_text_effect_class("", gradient_from, gradient_to, shimmer_base, shimmer_highlight) do
+    parse_text_effect_class(nil, gradient_from, gradient_to, shimmer_base, shimmer_highlight)
+  end
+
+  defp parse_text_effect_class(class, gradient_from, gradient_to, shimmer_base, shimmer_highlight)
+       when is_binary(class) do
     tokens = String.split(class, ~r/\s+/, trim: true)
 
     direction =
@@ -202,10 +281,12 @@ defmodule EasyBreezy.Typography do
         &(String.starts_with?(&1, "to-") && String.replace_prefix(&1, "to-", ""))
       )
 
+    shimmer? = Enum.any?(tokens, &(&1 in @shimmer_classes))
+
     box_class =
       tokens
       |> Enum.reject(fn token ->
-        token == direction or String.starts_with?(token, "from-") or
+        token == direction or token in @shimmer_classes or String.starts_with?(token, "from-") or
           String.starts_with?(token, "to-")
       end)
       |> Enum.join(" ")
@@ -214,16 +295,24 @@ defmodule EasyBreezy.Typography do
         other -> other
       end
 
-    gradient =
-      build_explicit_gradient(direction, gradient_from, gradient_to) ||
-        case {direction, from, to} do
-          {nil, _, _} -> nil
-          {_, nil, _} -> nil
-          {_, _, nil} -> nil
-          _ -> %{direction: direction, from: from, to: to}
+    shimmer =
+      build_explicit_shimmer(shimmer_base, shimmer_highlight) ||
+        if shimmer? and not is_nil(from) and not is_nil(to) do
+          %{base: from, highlight: to}
         end
 
-    {gradient, box_class}
+    gradient =
+      unless shimmer do
+        build_explicit_gradient(direction, gradient_from, gradient_to) ||
+          case {direction, from, to} do
+            {nil, _, _} -> nil
+            {_, nil, _} -> nil
+            {_, _, nil} -> nil
+            _ -> %{direction: direction, from: from, to: to}
+          end
+      end
+
+    {gradient, shimmer, box_class}
   end
 
   defp gradient_direction_from_class(class) when is_binary(class) do
@@ -240,11 +329,26 @@ defmodule EasyBreezy.Typography do
 
   defp build_explicit_gradient(_direction, _gradient_from, _gradient_to), do: nil
 
+  defp build_explicit_shimmer(base, highlight) when not is_nil(base) and not is_nil(highlight) do
+    %{base: base, highlight: highlight}
+  end
+
+  defp build_explicit_shimmer(_base, _highlight), do: nil
+
+  defp maybe_apply_text_effect(text, _gradient, shimmer, theme_colors, background)
+       when not is_nil(shimmer) do
+    maybe_apply_shimmer(text, shimmer, theme_colors, background, 0.0)
+  end
+
+  defp maybe_apply_text_effect(text, gradient, _shimmer, theme_colors, background) do
+    maybe_apply_gradient(text, gradient, theme_colors, background)
+  end
+
   defp maybe_apply_gradient(text, nil, _theme_colors, _background), do: text
 
   defp maybe_apply_gradient(text, gradient, theme_colors, background) do
-    with {:ok, from} <- resolve_gradient_color(gradient.from, theme_colors),
-         {:ok, to} <- resolve_gradient_color(gradient.to, theme_colors),
+    with {:ok, from} <- resolve_text_color(gradient.from, theme_colors),
+         {:ok, to} <- resolve_text_color(gradient.to, theme_colors),
          true <- rgb_color?(from),
          true <- rgb_color?(to) do
       gradient(text, gradient.direction, from, to, background)
@@ -253,7 +357,25 @@ defmodule EasyBreezy.Typography do
     end
   end
 
-  defp resolve_gradient_color(name, theme_colors) when is_binary(name) do
+  defp maybe_apply_shimmer(text, nil, _theme_colors, _background, _phase), do: text
+
+  defp maybe_apply_shimmer(text, shimmer, theme_colors, background, phase) do
+    with {:ok, base} <- resolve_text_color(shimmer.base, theme_colors),
+         {:ok, highlight} <- resolve_text_color(shimmer.highlight, theme_colors),
+         true <- rgb_color?(base),
+         true <- rgb_color?(highlight) do
+      shimmer(text, base, highlight, background, phase)
+    else
+      _ -> text
+    end
+  end
+
+  defp maybe_shimmer_implicit(nil, shimmer) when not is_nil(shimmer),
+    do: EasyBreezy.Implicit.TextShimmer
+
+  defp maybe_shimmer_implicit(implicit, _shimmer), do: implicit
+
+  defp resolve_text_color(name, theme_colors) when is_binary(name) do
     case name do
       "primary" -> fetch_theme_color(theme_colors, :primary)
       "secondary" -> fetch_theme_color(theme_colors, :secondary)
@@ -268,7 +390,7 @@ defmodule EasyBreezy.Typography do
     end
   end
 
-  defp resolve_gradient_color({_, _, _} = color, _theme_colors), do: {:ok, color}
+  defp resolve_text_color({_, _, _} = color, _theme_colors), do: {:ok, color}
 
   defp fetch_theme_color(theme_colors, key) do
     case Map.get(theme_colors, key) do
@@ -313,6 +435,14 @@ defmodule EasyBreezy.Typography do
   def gradient(text, _direction, from, to, background),
     do: apply_character_gradient(text, from, to, background)
 
+  def shimmer(text, base, highlight, background, phase) do
+    phase = min(1.0, max(0.0, phase))
+
+    text
+    |> String.split("\n", trim: false)
+    |> Enum.map_join("\n", &apply_line_shimmer(&1, base, highlight, background, phase))
+  end
+
   defp apply_line_gradient(lines, from, to, background) do
     total = max(length(lines) - 1, 1)
 
@@ -338,6 +468,24 @@ defmodule EasyBreezy.Typography do
         color = interpolate_color(from, to, index / total)
         ansi_foreground(color, background) <> grapheme
       end)
+    end)
+  end
+
+  defp apply_line_shimmer(line, base, highlight, background, phase) do
+    graphemes = String.graphemes(line)
+    total = max(length(graphemes) - 1, 1)
+    band_width = 0.18
+    center = phase * (1 + band_width)
+
+    graphemes
+    |> Enum.with_index()
+    |> Enum.map_join(fn {grapheme, index} ->
+      position = index / total
+      distance = abs(position - center)
+      amount = max(0.0, 1.0 - distance / band_width)
+      color = interpolate_color(base, highlight, amount * amount)
+
+      ansi_foreground(color, background) <> grapheme
     end)
   end
 
