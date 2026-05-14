@@ -25,10 +25,9 @@ defmodule EasyBreezy.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:breeze, path: "..//breeze_ssh"},
+      {:breeze, github: "gazler/breeze"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
-      {:lumis, path: "../lumis/packages/elixir/lumis"},
-      {:rustler, "~> 0.29", optional: true}
+      {:lumis, "~> 0.5.0"}
     ]
   end
 end

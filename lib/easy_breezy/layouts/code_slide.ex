@@ -133,7 +133,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
 
       source
       |> Lumis.highlight!(
-        formatter: {:terminal, language: language, theme: code_theme, default_bg: default_bg}
+        formatter: {:terminal, language: language, theme: code_theme, background: default_bg}
       )
       |> split_code_lines()
       |> normalize_code_line_resets(theme_colors)
