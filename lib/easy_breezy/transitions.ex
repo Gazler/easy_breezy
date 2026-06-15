@@ -117,7 +117,8 @@ defmodule EasyBreezy.Transitions do
 
   defp transition_frame_count(_direction, distance), do: transition_frames(distance)
 
-  defp scaled_transition_duration_ms(direction, distance) when direction in [:forward, :backward] do
+  defp scaled_transition_duration_ms(direction, distance)
+       when direction in [:forward, :backward] do
     scale_duration(distance, @reference_horizontal_distance)
   end
 

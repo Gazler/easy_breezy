@@ -60,7 +60,7 @@ defmodule EasyBreezy.Slideshow do
         render_context: %{
           theme_colors: assigns.theme_colors,
           code_theme: assigns.code_theme,
-          animate_title_gradient?: is_nil(assigns.transition)
+          animate_title_gradient?: true
         }
       )
 
