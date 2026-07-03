@@ -43,6 +43,10 @@ defmodule EasyBreezy.Transitions do
       |> assign(from_top: from_top)
       |> assign(to_left: to_left)
       |> assign(to_top: to_top)
+      |> assign(
+        transition_render_context:
+          transition_render_context(assigns.render_context, assigns.transition)
+      )
 
     ~H"""
     <box class="width-full height-full overflow-hidden">
@@ -55,7 +59,7 @@ defmodule EasyBreezy.Transitions do
           step={@transition.from_step}
           body_width={@body_width}
           body_height={@body_height}
-          render_context={@render_context}
+          render_context={@transition_render_context}
         />
       </box>
       <box
@@ -67,7 +71,7 @@ defmodule EasyBreezy.Transitions do
           step={@transition.to_step}
           body_width={@body_width}
           body_height={@body_height}
-          render_context={@render_context}
+          render_context={@transition_render_context}
         />
       </box>
     </box>
@@ -80,6 +84,7 @@ defmodule EasyBreezy.Transitions do
     distance = transition_distance(direction, body_width, body_height)
     frames = transition_frame_count(direction, distance)
     interval_ms = transition_interval_ms(direction, distance, frames)
+    frozen_now = System.monotonic_time(:millisecond)
 
     Process.send_after(self(), :transition_tick, interval_ms)
 
@@ -93,7 +98,8 @@ defmodule EasyBreezy.Transitions do
         distance: distance,
         frame: 0,
         frames: frames,
-        interval_ms: interval_ms
+        interval_ms: interval_ms,
+        animation_frozen_now: frozen_now
       }
     )
   end
@@ -147,6 +153,19 @@ defmodule EasyBreezy.Transitions do
 
   defp transition_distance(direction, _body_width, body_height) when direction in [:up, :down],
     do: body_height
+
+  defp transition_render_context(render_context, transition) when is_map(render_context) do
+    render_context
+    |> Map.put(:animate_title_gradient?, true)
+    |> Map.put(:animation_frozen_now, Map.get(transition, :animation_frozen_now))
+  end
+
+  defp transition_render_context(_render_context, transition) do
+    %{
+      animate_title_gradient?: true,
+      animation_frozen_now: Map.get(transition, :animation_frozen_now)
+    }
+  end
 
   defp transition_positions(:forward, body_width, _body_height, distance),
     do: {-distance, 0, body_width - distance, 0}

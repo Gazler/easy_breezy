@@ -17,9 +17,10 @@ defmodule EasyBreezy.Implicit.TitleGradient do
       |> Map.put(:theme_colors, attr(root_attrs, :gradient_theme_colors, %{}))
       |> Map.put(:background, attr(root_attrs, :gradient_background, nil))
       |> Map.put(:source, attr(root_attrs, :gradient_source, nil))
+      |> Map.put(:frozen_now, frozen_now(root_attrs))
       |> Map.put(:started_at_ms, started_at_ms)
 
-    {:ok, state, rerender_every: @tick_ms}
+    {:ok, state, animation_options(state)}
   end
 
   def handle_modifiers(_type, _flags, _state), do: []
@@ -93,6 +94,10 @@ defmodule EasyBreezy.Implicit.TitleGradient do
 
   defp gradient_colors(_state, _ctx), do: :error
 
+  defp gradient_frame(%{frozen_now: now} = state, _ctx) when is_integer(now) do
+    elapsed_state_frame(state, now)
+  end
+
   defp gradient_frame(state, %{now: now}) when is_integer(now) do
     elapsed_state_frame(state, now)
   end
@@ -116,6 +121,17 @@ defmodule EasyBreezy.Implicit.TitleGradient do
   end
 
   defp attr(_attrs, _key, default), do: default
+
+  defp animation_options(%{frozen_now: value}) when is_integer(value), do: []
+  defp animation_options(_state), do: [rerender_every: @tick_ms]
+
+  defp frozen_now(root_attrs) do
+    case attr(root_attrs, :animation_frozen_now, nil) ||
+           attr(root_attrs, :gradient_frozen_now, nil) do
+      value when is_integer(value) -> value
+      _other -> nil
+    end
+  end
 
   defp rgb_color?({red, green, blue})
        when red in 0..255 and green in 0..255 and blue in 0..255,

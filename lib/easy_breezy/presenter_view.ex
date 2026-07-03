@@ -302,6 +302,8 @@ defmodule EasyBreezy.PresenterView do
 
   defp image_payload?(%{right_mode: :image}), do: true
   defp image_payload?(%{right_mode: "image"}), do: true
+  defp image_payload?(%{left_mode: :image}), do: true
+  defp image_payload?(%{left_mode: "image"}), do: true
   defp image_payload?(_payload), do: false
 
   defp speaker_notes(slide, body_width, step) do

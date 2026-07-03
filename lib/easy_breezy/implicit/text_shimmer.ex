@@ -7,6 +7,10 @@ defmodule EasyBreezy.Implicit.TextShimmer do
   @pause_frames div(@pause_ms + @tick_ms - 1, @tick_ms)
 
   def init(_children, root_attrs, last_state) do
+    started_at_ms =
+      Map.get(last_state, :started_at_ms) ||
+        System.monotonic_time(:millisecond)
+
     state =
       last_state
       |> Map.put(:theme_colors, attr(root_attrs, :shimmer_theme_colors, %{}))
@@ -14,14 +18,16 @@ defmodule EasyBreezy.Implicit.TextShimmer do
       |> Map.put(:source, attr(root_attrs, :shimmer_source, nil))
       |> Map.put(:base, attr(root_attrs, :shimmer_base, nil))
       |> Map.put(:highlight, attr(root_attrs, :shimmer_highlight, nil))
+      |> Map.put(:frozen_now, frozen_now(root_attrs))
+      |> Map.put(:started_at_ms, started_at_ms)
 
-    {:ok, state, rerender_every: @tick_ms}
+    {:ok, state, animation_options(state)}
   end
 
   def handle_modifiers(_type, _flags, _state), do: []
 
-  def animate(:root, box, _flags, state, %{frame: frame, layout: %Breeze.Viewport{} = layout}) do
-    content = shimmer_content(box, state, frame)
+  def animate(:root, box, _flags, state, %{layout: %Breeze.Viewport{} = layout} = ctx) do
+    content = shimmer_content(box, state, shimmer_frame(state, ctx))
 
     if content == box.content do
       box
@@ -30,8 +36,8 @@ defmodule EasyBreezy.Implicit.TextShimmer do
     end
   end
 
-  def animate(:root, box, _flags, state, %{frame: frame}) do
-    content = shimmer_content(box, state, frame)
+  def animate(:root, box, _flags, state, ctx) do
+    content = shimmer_content(box, state, shimmer_frame(state, ctx))
 
     if content == box.content do
       box
@@ -42,6 +48,16 @@ defmodule EasyBreezy.Implicit.TextShimmer do
 
   def animate(:child, box, _flags, _state, _ctx), do: box
 
+  def elapsed_frame(started_at_ms, now)
+      when is_integer(started_at_ms) and is_integer(now) do
+    now
+    |> Kernel.-(started_at_ms)
+    |> max(0)
+    |> div(@tick_ms)
+  end
+
+  def elapsed_frame(_started_at_ms, _now), do: 0
+
   defp shimmer_content(box, state, frame) do
     with {:ok, base} <- resolve_color(state.base, state.theme_colors),
          {:ok, highlight} <- resolve_color(state.highlight, state.theme_colors) do
@@ -51,6 +67,24 @@ defmodule EasyBreezy.Implicit.TextShimmer do
       _ -> box.content
     end
   end
+
+  defp shimmer_frame(%{frozen_now: now} = state, _ctx) when is_integer(now) do
+    elapsed_state_frame(state, now)
+  end
+
+  defp shimmer_frame(state, %{now: now}) when is_integer(now) do
+    elapsed_state_frame(state, now)
+  end
+
+  defp shimmer_frame(_state, %{frame: frame}) when is_integer(frame), do: frame
+  defp shimmer_frame(_state, _ctx), do: 0
+
+  defp elapsed_state_frame(%{started_at_ms: started_at_ms}, now)
+       when is_integer(started_at_ms) and is_integer(now) do
+    elapsed_frame(started_at_ms, now)
+  end
+
+  defp elapsed_state_frame(_state, _now), do: 0
 
   defp phase(frame) do
     step = rem(frame, @phase_count + @pause_frames)
@@ -107,6 +141,17 @@ defmodule EasyBreezy.Implicit.TextShimmer do
 
   defp attr(attrs, key, default) do
     Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key), default)
+  end
+
+  defp animation_options(%{frozen_now: value}) when is_integer(value), do: []
+  defp animation_options(_state), do: [rerender_every: @tick_ms]
+
+  defp frozen_now(root_attrs) do
+    case attr(root_attrs, :animation_frozen_now, nil) ||
+           attr(root_attrs, :shimmer_frozen_now, nil) do
+      value when is_integer(value) -> value
+      _other -> nil
+    end
   end
 
   defp line_overlays(content, %Breeze.Viewport{left: left, top: top}) do

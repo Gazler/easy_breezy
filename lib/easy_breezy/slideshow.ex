@@ -255,7 +255,7 @@ defmodule EasyBreezy.Slideshow do
           else
             term
             |> assign(slide_index: next_index, step: 0)
-            |> maybe_delete_image_overlay(slide.id)
+            |> maybe_delete_image_overlay(slide)
           end
 
         true ->
@@ -381,7 +381,7 @@ defmodule EasyBreezy.Slideshow do
           else
             term
             |> assign(slide_index: previous_index, step: previous_slide.steps)
-            |> maybe_delete_image_overlay(slide.id)
+            |> maybe_delete_image_overlay(slide)
           end
 
         true ->
@@ -399,7 +399,7 @@ defmodule EasyBreezy.Slideshow do
 
     term
     |> assign(slide_index: slide_index, step: step, transition: nil)
-    |> maybe_delete_image_overlay(previous_slide.id)
+    |> maybe_delete_image_overlay(previous_slide)
   end
 
   defp visible_position(%{
@@ -480,9 +480,19 @@ defmodule EasyBreezy.Slideshow do
     ]
   end
 
-  defp maybe_delete_image_overlay(term, :image) do
-    EasyBreezy.Slideshow.KittyImage.delete_overlay(term)
+  defp maybe_delete_image_overlay(term, previous_slide) do
+    if image_slide?(previous_slide) do
+      EasyBreezy.Slideshow.KittyImage.delete_overlay(term)
+    else
+      term
+    end
   end
 
-  defp maybe_delete_image_overlay(term, _previous_slide_id), do: term
+  defp image_slide?(%{id: :image}), do: true
+  defp image_slide?(%{payload: payload}), do: image_payload?(payload)
+  defp image_slide?(_slide), do: false
+
+  defp image_payload?(%{left_mode: mode}) when mode in [:image, "image"], do: true
+  defp image_payload?(%{right_mode: mode}) when mode in [:image, "image"], do: true
+  defp image_payload?(_payload), do: false
 end

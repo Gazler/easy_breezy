@@ -25,6 +25,7 @@ defmodule EasyBreezy.Typography do
   attr(:gradient_to, :any, default: nil)
   attr(:shimmer_base, :any, default: nil)
   attr(:shimmer_highlight, :any, default: nil)
+  attr(:animation_frozen_now, :any, default: nil)
   attr(:id, :string, default: nil)
   attr(:implicit, :any, default: nil)
   attr(:rest, :global)
@@ -64,6 +65,7 @@ defmodule EasyBreezy.Typography do
       shimmer_source={@shimmer_source}
       shimmer_base={@shimmer_base}
       shimmer_highlight={@shimmer_highlight}
+      animation_frozen_now={@animation_frozen_now}
       {@rest}
     >
       {@content}
@@ -77,6 +79,7 @@ defmodule EasyBreezy.Typography do
   attr(:background, :any, default: nil)
   attr(:gradient_from, :any, default: nil)
   attr(:gradient_to, :any, default: nil)
+  attr(:animation_frozen_now, :any, default: nil)
   attr(:shimmer_base, :any, default: nil)
   attr(:shimmer_highlight, :any, default: nil)
   attr(:id, :string, default: nil)
@@ -134,6 +137,7 @@ defmodule EasyBreezy.Typography do
       gradient_theme_colors={@theme_colors}
       gradient_background={@background}
       gradient_source={@gradient_source}
+      animation_frozen_now={@animation_frozen_now}
       shimmer_theme_colors={@theme_colors}
       shimmer_background={@background}
       shimmer_source={@shimmer_source}

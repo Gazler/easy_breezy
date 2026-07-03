@@ -4,7 +4,7 @@ defmodule EasyBreezy.Slideshow.KittyImage do
   @image_id 991_337
   @placement_id 1
   @offset_x 1
-  @offset_y 2
+  @offset_y 1
 
   def init(_children, root_attrs, last_state) do
     path = Map.get(root_attrs, :"image-path")

@@ -2,11 +2,8 @@ defmodule EasyBreezy.SlideshowTransitionTest do
   use ExUnit.Case, async: false
 
   alias EasyBreezy.{Deck, Slide}
-  alias EasyBreezy.Implicit.TitleGradient
 
-  @tick_ms 90
-
-  test "keeps the title gradient active during slide transitions" do
+  test "freezes animated text at its transition-start frame" do
     session =
       Breeze.Test.start!(EasyBreezy.Slideshow,
         size: {80, 24},
@@ -22,23 +19,63 @@ defmodule EasyBreezy.SlideshowTransitionTest do
 
     _initial_render = Breeze.Test.render!(session)
 
-    Process.sleep(3 * @tick_ms)
-
     assert {:noreply, _focused, true} =
              Breeze.Test.event(session, nil, %{"key" => "ArrowRight"})
 
-    rendered = Breeze.Test.render!(session)
+    _rendered = Breeze.Test.render!(session)
 
     metadata = Breeze.Test.metadata(session)
 
-    assert metadata.assigns.transition
-    assert {_id, {_mod, state}} = title_gradient(metadata.implicit_state)
-    assert is_integer(state.started_at_ms)
+    assert transition = metadata.assigns.transition
 
-    frame = TitleGradient.elapsed_frame(state.started_at_ms, System.monotonic_time(:millisecond))
+    assert {gradient_id, {EasyBreezy.Implicit.TitleGradient, gradient_state}} =
+             title_gradient(metadata.implicit_state)
 
-    assert frame > 0
-    assert rendered_gradient_frame?(rendered, state.theme_colors, frame)
+    assert {shimmer_id, {EasyBreezy.Implicit.TextShimmer, shimmer_state}} =
+             text_shimmer(metadata.implicit_state)
+
+    assert gradient_state.frozen_now == transition.animation_frozen_now
+    assert shimmer_state.frozen_now == transition.animation_frozen_now
+    assert Map.get(metadata.implicit_meta, gradient_id, %{}) == %{}
+    assert Map.get(metadata.implicit_meta, shimmer_id, %{}) == %{}
+
+    frozen_gradient_frame =
+      EasyBreezy.Implicit.TitleGradient.elapsed_frame(
+        gradient_state.started_at_ms,
+        gradient_state.frozen_now
+      )
+
+    frozen_shimmer_frame =
+      EasyBreezy.Implicit.TextShimmer.elapsed_frame(
+        shimmer_state.started_at_ms,
+        shimmer_state.frozen_now
+      )
+
+    send(session.pid, :transition_tick)
+    _rendered = Breeze.Test.render!(session)
+
+    next_metadata = Breeze.Test.metadata(session)
+
+    assert {^gradient_id, {EasyBreezy.Implicit.TitleGradient, next_gradient_state}} =
+             title_gradient(next_metadata.implicit_state)
+
+    assert {^shimmer_id, {EasyBreezy.Implicit.TextShimmer, next_shimmer_state}} =
+             text_shimmer(next_metadata.implicit_state)
+
+    assert next_gradient_state.frozen_now == gradient_state.frozen_now
+    assert next_shimmer_state.frozen_now == shimmer_state.frozen_now
+    assert Map.get(next_metadata.implicit_meta, gradient_id, %{}) == %{}
+    assert Map.get(next_metadata.implicit_meta, shimmer_id, %{}) == %{}
+
+    assert EasyBreezy.Implicit.TitleGradient.elapsed_frame(
+             next_gradient_state.started_at_ms,
+             next_gradient_state.frozen_now
+           ) == frozen_gradient_frame
+
+    assert EasyBreezy.Implicit.TextShimmer.elapsed_frame(
+             next_shimmer_state.started_at_ms,
+             next_shimmer_state.frozen_now
+           ) == frozen_shimmer_frame
   end
 
   defp title_gradient(implicit_state) do
@@ -48,17 +85,12 @@ defmodule EasyBreezy.SlideshowTransitionTest do
     end)
   end
 
-  defp rendered_gradient_frame?(rendered, theme_colors, frame) do
-    first_frame = max(frame - 2, 1)
-
-    Enum.any?(first_frame..(frame + 1), fn frame ->
-      with {:ok, from, _to} <- TitleGradient.colors(theme_colors, frame) do
-        rendered =~ ansi_foreground(from)
-      end
+  defp text_shimmer(implicit_state) do
+    Enum.find(implicit_state, fn
+      {"footer-shimmer-" <> _, {EasyBreezy.Implicit.TextShimmer, _state}} -> true
+      _other -> nil
     end)
   end
-
-  defp ansi_foreground({red, green, blue}), do: "38;2;#{red};#{green};#{blue}m"
 
   defp transition_deck do
     %Deck{

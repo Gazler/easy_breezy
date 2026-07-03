@@ -26,6 +26,8 @@ defmodule EasyBreezy.Layouts do
               left_title: nil,
               left_items: [],
               left_lines: [],
+              left_mode: :text,
+              left_path: nil,
               right_title: nil,
               right_lines: [],
               right_notice: nil,
@@ -64,6 +66,8 @@ defmodule EasyBreezy.Layouts do
       left_title={@slide_payload.left_title}
       left_items={@slide_payload.left_items}
       left_lines={@slide_payload.left_lines}
+      left_mode={@slide_payload[:left_mode] || :text}
+      left_path={@slide_payload[:left_path]}
       right_title={@slide_payload.right_title}
       right_lines={@slide_payload.right_lines}
       right_notice={@slide_payload[:right_notice]}
