@@ -84,19 +84,69 @@ defmodule EasyBreezy.Typography do
   attr(:shimmer_highlight, :any, default: nil)
   attr(:id, :string, default: nil)
   attr(:implicit, :any, default: nil)
+  attr(:font, :any, default: nil)
+  attr(:letter_spacing, :integer, default: 0)
   attr(:rest, :global)
   slot(:inner_block, required: true)
 
   def h1(assigns) do
+    heading(assigns, :ansi_shadow)
+  end
+
+  attr(:class, :string, default: nil)
+  attr(:style, :any, default: nil)
+  attr(:theme_colors, :map, default: %{})
+  attr(:background, :any, default: nil)
+  attr(:gradient_from, :any, default: nil)
+  attr(:gradient_to, :any, default: nil)
+  attr(:animation_frozen_now, :any, default: nil)
+  attr(:shimmer_base, :any, default: nil)
+  attr(:shimmer_highlight, :any, default: nil)
+  attr(:id, :string, default: nil)
+  attr(:implicit, :any, default: nil)
+  attr(:font, :any, default: nil)
+  attr(:letter_spacing, :integer, default: 0)
+  attr(:rest, :global)
+  slot(:inner_block, required: true)
+
+  def h2(assigns) do
+    heading(assigns, :future)
+  end
+
+  attr(:class, :string, default: nil)
+  attr(:style, :any, default: nil)
+  attr(:theme_colors, :map, default: %{})
+  attr(:background, :any, default: nil)
+  attr(:gradient_from, :any, default: nil)
+  attr(:gradient_to, :any, default: nil)
+  attr(:animation_frozen_now, :any, default: nil)
+  attr(:shimmer_base, :any, default: nil)
+  attr(:shimmer_highlight, :any, default: nil)
+  attr(:id, :string, default: nil)
+  attr(:implicit, :any, default: nil)
+  attr(:font, :any, default: nil)
+  attr(:letter_spacing, :integer, default: 0)
+  attr(:rest, :global)
+  slot(:inner_block, required: true)
+
+  def h3(assigns) do
+    heading(assigns, :js_stick_letters)
+  end
+
+  defp heading(assigns, default_font) do
     theme_colors = Map.get(assigns, :theme_colors, %{})
     background = Map.get(assigns, :background)
+    font = Map.get(assigns, :font) || default_font
 
     source =
       assigns
       |> render_slot_text()
       |> String.trim_trailing("\n")
       |> String.upcase()
-      |> bannerize()
+      |> EasyBreezy.Figlet.render(font,
+        trim_vertical: true,
+        letter_spacing: Map.get(assigns, :letter_spacing, 0)
+      )
 
     {gradient, shimmer, class} =
       parse_text_effect_class(
@@ -148,103 +198,6 @@ defmodule EasyBreezy.Typography do
       {@content}
     </box>
     """
-  end
-
-  defp bannerize(text) when is_binary(text) do
-    text
-    |> String.graphemes()
-    |> Enum.reduce(List.duplicate("", 6), fn grapheme, rows ->
-      glyph =
-        grapheme
-        |> then(&Map.get(banner_font(), &1, fallback_glyph(&1)))
-        |> normalize_glyph()
-
-      Enum.zip_with(rows, glyph, fn row, segment ->
-        row <>
-          if row == "" do
-            segment
-          else
-            " " <> segment
-          end
-      end)
-    end)
-    |> Enum.join("\n")
-  end
-
-  defp normalize_glyph(rows) when is_list(rows) do
-    width =
-      rows
-      |> Enum.map(&String.length/1)
-      |> Enum.max(fn -> 0 end)
-
-    Enum.map(rows, &String.pad_trailing(&1, width))
-  end
-
-  defp banner_font do
-    %{
-      " " => List.duplicate("   ", 6),
-      "A" => [
-        " █████╗ ",
-        "██╔══██╗",
-        "███████║",
-        "██╔══██║",
-        "██║  ██║",
-        "╚═╝  ╚═╝"
-      ],
-      "B" => [
-        "██████╗",
-        "██╔══██╗",
-        "██████╔╝",
-        "██╔══██╗",
-        "██████╔╝",
-        "╚═════╝"
-      ],
-      "E" => [
-        "███████╗",
-        "██╔════╝",
-        "█████╗  ",
-        "██╔══╝  ",
-        "███████╗",
-        "╚══════╝"
-      ],
-      "R" => [
-        "██████╗ ",
-        "██╔══██╗",
-        "██████╔╝",
-        "██╔══██╗",
-        "██║  ██║",
-        "╚═╝  ╚═╝"
-      ],
-      "S" => [
-        "███████╗",
-        "██╔════╝",
-        "███████╗",
-        "╚════██║",
-        "███████║",
-        "╚══════╝"
-      ],
-      "Y" => [
-        "██╗   ██╗",
-        "╚██╗ ██╔╝",
-        " ╚████╔╝ ",
-        "  ╚██╔╝  ",
-        "   ██║   ",
-        "   ╚═╝   "
-      ],
-      "Z" => [
-        "███████╗",
-        "╚══███╔╝",
-        "  ███╔╝ ",
-        " ███╔╝  ",
-        "███████╗",
-        "╚══════╝"
-      ]
-    }
-  end
-
-  defp fallback_glyph(grapheme) do
-    padded = String.pad_trailing(grapheme, 3)
-    List.duplicate(padded, 6)
   end
 
   defp render_slot_text(assigns) do

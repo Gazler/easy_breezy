@@ -28,6 +28,11 @@ defmodule EasyBreezy.Layouts do
               left_lines: [],
               left_mode: :text,
               left_path: nil,
+              subtitle: nil,
+              speaker: nil,
+              footer: nil,
+              title_font: nil,
+              font: nil,
               right_title: nil,
               right_lines: [],
               right_notice: nil,
@@ -50,6 +55,7 @@ defmodule EasyBreezy.Layouts do
       subtitle={@slide_payload.subtitle}
       speaker={@slide_payload.speaker}
       footer={@slide_payload.footer}
+      font={@slide_payload.title_font || @slide_payload.font}
       render_context={@render_context}
     />
     <.bullets_slide

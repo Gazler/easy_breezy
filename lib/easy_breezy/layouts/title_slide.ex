@@ -10,9 +10,16 @@ defmodule EasyBreezy.Layouts.TitleSlide do
   attr(:subtitle, :string, default: nil)
   attr(:speaker, :string, default: nil)
   attr(:footer, :string, default: nil)
+  attr(:font, :any, default: nil)
   attr(:render_context, :map, default: %{})
 
   def title_slide(assigns) do
+    assigns =
+      Map.merge(
+        %{subtitle: nil, speaker: nil, footer: nil, font: nil, render_context: %{}},
+        assigns
+      )
+
     theme_colors = Map.get(assigns.render_context, :theme_colors, %{})
     animate_title_gradient? = Map.get(assigns.render_context, :animate_title_gradient?, true)
     animation_frozen_now = Map.get(assigns.render_context, :animation_frozen_now)
@@ -47,14 +54,13 @@ defmodule EasyBreezy.Layouts.TitleSlide do
           theme_colors={@theme_colors}
           background={Map.get(@theme_colors, :surface)}
           animation_frozen_now={@animation_frozen_now}
+          font={@font}
         >
           {@title}
         </.h1>
       </box>
       <box class="text-center">
         <box :if={@subtitle} class="text-muted">{@subtitle}</box>
-        <box :if={@speaker}>
-        </box>
         <box :if={@speaker}>by {@speaker}</box>
       </box>
       <box class="text-center">
