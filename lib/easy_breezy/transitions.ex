@@ -6,10 +6,13 @@ defmodule EasyBreezy.Transitions do
   import EasyBreezy.Layouts
 
   @slide_transition_duration_ms 200
-  @reference_horizontal_distance 80
-  @reference_vertical_distance 24
+  @slide_transition_small_duration_ms 400
+  @small_horizontal_distance 80
+  @small_vertical_distance 20
+  @reference_horizontal_distance 160
+  @reference_vertical_distance 40
   @transition_columns_per_frame 10
-  @transition_min_frames 4
+  @transition_min_frames 16
 
   attr(:transition, :map, required: true)
   attr(:deck, :map, required: true)
@@ -125,20 +128,31 @@ defmodule EasyBreezy.Transitions do
 
   defp scaled_transition_duration_ms(direction, distance)
        when direction in [:forward, :backward] do
-    scale_duration(distance, @reference_horizontal_distance)
+    scale_duration(distance, @small_horizontal_distance, @reference_horizontal_distance)
   end
 
   defp scaled_transition_duration_ms(direction, distance) when direction in [:up, :down] do
-    scale_duration(distance, @reference_vertical_distance)
+    scale_duration(distance, @small_vertical_distance, @reference_vertical_distance)
   end
 
-  defp scale_duration(distance, reference_distance) do
+  defp scale_duration(distance, small_distance, reference_distance) do
     distance = max(distance, 1)
 
-    scale =
-      max(reference_distance / distance, 1.0)
+    cond do
+      distance <= small_distance ->
+        @slide_transition_small_duration_ms
 
-    round(@slide_transition_duration_ms * scale)
+      distance >= reference_distance ->
+        @slide_transition_duration_ms
+
+      true ->
+        progress = (distance - small_distance) / (reference_distance - small_distance)
+
+        round(
+          @slide_transition_small_duration_ms -
+            progress * (@slide_transition_small_duration_ms - @slide_transition_duration_ms)
+        )
+    end
   end
 
   defp incoming_transition_direction(:slide), do: :forward
