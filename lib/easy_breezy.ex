@@ -3,6 +3,9 @@ defmodule EasyBreezy do
   Generic slideshow helpers built on top of Breeze.
   """
 
+  @reload_source_extensions [".ex", ".exs"]
+  @reload_watch_extensions @reload_source_extensions ++ [".md", ".markdown"]
+
   def run(opts) do
     start_opts = start_opts(opts)
     reload_opts = reload_opts(opts)
@@ -90,26 +93,87 @@ defmodule EasyBreezy do
         [
           enabled?: true,
           force?: true,
-          paths: reload_paths(),
+          paths: reload_paths(opts),
+          files_fun: &reload_files/1,
+          compile_fun: &compile_reload_files/1,
           refresh_server_opts: {__MODULE__, :refresh_server_opts, [opts]}
         ]
 
       reload_opts when is_list(reload_opts) ->
         reload_opts
         |> Keyword.put_new(:force?, true)
-        |> Keyword.put_new(:paths, reload_paths())
+        |> Keyword.put_new(:paths, reload_paths(opts))
+        |> Keyword.put_new(:files_fun, &reload_files/1)
+        |> Keyword.put_new(:compile_fun, &compile_reload_files/1)
         |> Keyword.put_new(:refresh_server_opts, {__MODULE__, :refresh_server_opts, [opts]})
     end
   end
 
-  defp reload_paths do
+  defp reload_paths(opts) do
     root = Path.expand("..", __DIR__)
-    [Path.join(root, "lib"), Path.join(root, "examples")]
+    paths = [Path.join(root, "lib"), Path.join(root, "examples")]
+
+    case Keyword.get(opts, :deck) do
+      path when is_binary(path) ->
+        if EasyBreezy.Deck.Markdown.markdown_path?(path) do
+          [Path.dirname(Path.expand(path)) | paths]
+        else
+          paths
+        end
+
+      _deck ->
+        paths
+    end
+    |> Enum.uniq()
+  end
+
+  defp reload_files(paths) do
+    paths
+    |> Enum.flat_map(fn path ->
+      if File.dir?(path) do
+        Path.wildcard(Path.join(path, "**/*.{ex,exs,md,markdown}"))
+      else
+        []
+      end
+    end)
+    |> Enum.filter(&(Path.extname(&1) in @reload_watch_extensions))
+    |> Enum.uniq()
+  end
+
+  defp compile_reload_files(files) do
+    previous = Code.compiler_options()
+    Code.put_compiler_option(:ignore_module_conflict, true)
+
+    try do
+      Breeze.ReloadContext.with_compile(fn ->
+        files
+        |> Enum.filter(&reload_source_file?/1)
+        |> Enum.each(&Code.compile_file/1)
+      end)
+
+      :ok
+    rescue
+      error -> {:error, error}
+    after
+      Code.compiler_options(previous)
+    end
+  end
+
+  defp reload_source_file?(path) do
+    File.regular?(path) and Path.extname(path) in @reload_source_extensions
   end
 
   defp resolve_deck({module, function, args})
        when is_atom(module) and is_atom(function) and is_list(args) do
     apply(module, function, args)
+  end
+
+  defp resolve_deck(path) when is_binary(path) do
+    if EasyBreezy.Deck.Markdown.markdown_path?(path) do
+      EasyBreezy.Deck.Markdown.load!(path)
+    else
+      path
+    end
   end
 
   defp resolve_deck(deck) when is_function(deck, 0), do: deck.()

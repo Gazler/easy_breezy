@@ -16,11 +16,11 @@ defmodule EasyBreezy.Transitions do
   @transition_columns_per_frame 10
   @transition_min_frames 16
 
-  attr(:transition, :map, required: true)
-  attr(:deck, :map, required: true)
-  attr(:body_width, :integer, required: true)
-  attr(:body_height, :integer, required: true)
-  attr(:render_context, :map, default: %{})
+  attr :transition, :map, required: true
+  attr :deck, :map, required: true
+  attr :body_width, :integer, required: true
+  attr :body_height, :integer, required: true
+  attr :render_context, :map, default: %{}
 
   def slide_transition(assigns) do
     from_slide = Enum.at(assigns.deck.slides, assigns.transition.from_index)

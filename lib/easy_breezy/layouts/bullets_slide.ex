@@ -6,11 +6,11 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
   import Breeze.Blocks
   import EasyBreezy.Layouts.Helpers
 
-  attr(:title, :string, required: true)
-  attr(:items, :list, required: true)
-  attr(:step, :integer, required: true)
-  attr(:body_width, :integer, required: true)
-  attr(:render_context, :map, default: %{})
+  attr :title, :string, required: true
+  attr :items, :list, required: true
+  attr :step, :integer, required: true
+  attr :body_width, :integer, required: true
+  attr :render_context, :map, default: %{}
 
   def bullets_slide(assigns) do
     visible_items = Enum.take(assigns.items, assigns.step + 1)

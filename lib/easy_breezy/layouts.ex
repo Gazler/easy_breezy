@@ -5,17 +5,18 @@ defmodule EasyBreezy.Layouts do
 
   import EasyBreezy.Layouts.BulletsSlide
   import EasyBreezy.Layouts.CodeSlide
+  import EasyBreezy.Layouts.MarkdownSlide
   import EasyBreezy.Layouts.PresenterSlide
   import EasyBreezy.Layouts.TitleSlide
   import EasyBreezy.Layouts.TwoColumnSlide
 
   alias EasyBreezy.Layouts.CodeSlide
 
-  attr(:slide, :any, required: true)
-  attr(:step, :integer, required: true)
-  attr(:body_width, :integer, required: true)
-  attr(:body_height, :integer, required: true)
-  attr(:render_context, :map, default: %{})
+  attr :slide, :any, required: true
+  attr :step, :integer, required: true
+  attr :body_width, :integer, required: true
+  attr :body_height, :integer, required: true
+  attr :render_context, :map, default: %{}
 
   def slide_body(assigns) do
     payload =
@@ -48,7 +49,9 @@ defmodule EasyBreezy.Layouts do
               code_language: nil,
               code_source: nil,
               code_path: nil,
-              code_focus_ranges: []
+              code_focus_ranges: [],
+              markdown: nil,
+              markdown_blocks: nil
             },
             payload
           )
@@ -99,6 +102,16 @@ defmodule EasyBreezy.Layouts do
       items={@slide_payload.items}
       notes={@slide_payload.notes}
       step={@step}
+      body_height={@body_height}
+      render_context={@render_context}
+    />
+    <.markdown_slide
+      :if={@slide.layout == :markdown}
+      slide_id={@slide.id}
+      title={@slide_payload.title}
+      content={@slide_payload.markdown}
+      blocks={@slide_payload[:markdown_blocks]}
+      body_width={@body_width}
       body_height={@body_height}
       render_context={@render_context}
     />

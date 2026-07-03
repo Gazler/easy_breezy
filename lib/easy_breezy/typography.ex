@@ -17,18 +17,18 @@ defmodule EasyBreezy.Typography do
   @gradient_directions ~w(text-gradient-to-r text-gradient-to-l text-gradient-to-b text-gradient-to-t)
   @shimmer_classes ~w(text-shimmer)
 
-  attr(:class, :string, default: nil)
-  attr(:style, :any, default: nil)
-  attr(:theme_colors, :map, default: %{})
-  attr(:background, :any, default: nil)
-  attr(:gradient_from, :any, default: nil)
-  attr(:gradient_to, :any, default: nil)
-  attr(:shimmer_base, :any, default: nil)
-  attr(:shimmer_highlight, :any, default: nil)
-  attr(:animation_frozen_now, :any, default: nil)
-  attr(:id, :string, default: nil)
-  attr(:implicit, :any, default: nil)
-  attr(:rest, :global)
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :theme_colors, :map, default: %{}
+  attr :background, :any, default: nil
+  attr :gradient_from, :any, default: nil
+  attr :gradient_to, :any, default: nil
+  attr :shimmer_base, :any, default: nil
+  attr :shimmer_highlight, :any, default: nil
+  attr :animation_frozen_now, :any, default: nil
+  attr :id, :string, default: nil
+  attr :implicit, :any, default: nil
+  attr :rest, :global
   slot(:inner_block, required: true)
 
   def text(assigns) do
@@ -73,60 +73,60 @@ defmodule EasyBreezy.Typography do
     """
   end
 
-  attr(:class, :string, default: nil)
-  attr(:style, :any, default: nil)
-  attr(:theme_colors, :map, default: %{})
-  attr(:background, :any, default: nil)
-  attr(:gradient_from, :any, default: nil)
-  attr(:gradient_to, :any, default: nil)
-  attr(:animation_frozen_now, :any, default: nil)
-  attr(:shimmer_base, :any, default: nil)
-  attr(:shimmer_highlight, :any, default: nil)
-  attr(:id, :string, default: nil)
-  attr(:implicit, :any, default: nil)
-  attr(:font, :any, default: nil)
-  attr(:letter_spacing, :integer, default: 0)
-  attr(:rest, :global)
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :theme_colors, :map, default: %{}
+  attr :background, :any, default: nil
+  attr :gradient_from, :any, default: nil
+  attr :gradient_to, :any, default: nil
+  attr :animation_frozen_now, :any, default: nil
+  attr :shimmer_base, :any, default: nil
+  attr :shimmer_highlight, :any, default: nil
+  attr :id, :string, default: nil
+  attr :implicit, :any, default: nil
+  attr :font, :any, default: nil
+  attr :letter_spacing, :integer, default: 0
+  attr :rest, :global
   slot(:inner_block, required: true)
 
   def h1(assigns) do
     heading(assigns, :ansi_shadow)
   end
 
-  attr(:class, :string, default: nil)
-  attr(:style, :any, default: nil)
-  attr(:theme_colors, :map, default: %{})
-  attr(:background, :any, default: nil)
-  attr(:gradient_from, :any, default: nil)
-  attr(:gradient_to, :any, default: nil)
-  attr(:animation_frozen_now, :any, default: nil)
-  attr(:shimmer_base, :any, default: nil)
-  attr(:shimmer_highlight, :any, default: nil)
-  attr(:id, :string, default: nil)
-  attr(:implicit, :any, default: nil)
-  attr(:font, :any, default: nil)
-  attr(:letter_spacing, :integer, default: 0)
-  attr(:rest, :global)
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :theme_colors, :map, default: %{}
+  attr :background, :any, default: nil
+  attr :gradient_from, :any, default: nil
+  attr :gradient_to, :any, default: nil
+  attr :animation_frozen_now, :any, default: nil
+  attr :shimmer_base, :any, default: nil
+  attr :shimmer_highlight, :any, default: nil
+  attr :id, :string, default: nil
+  attr :implicit, :any, default: nil
+  attr :font, :any, default: nil
+  attr :letter_spacing, :integer, default: 0
+  attr :rest, :global
   slot(:inner_block, required: true)
 
   def h2(assigns) do
     heading(assigns, :future)
   end
 
-  attr(:class, :string, default: nil)
-  attr(:style, :any, default: nil)
-  attr(:theme_colors, :map, default: %{})
-  attr(:background, :any, default: nil)
-  attr(:gradient_from, :any, default: nil)
-  attr(:gradient_to, :any, default: nil)
-  attr(:animation_frozen_now, :any, default: nil)
-  attr(:shimmer_base, :any, default: nil)
-  attr(:shimmer_highlight, :any, default: nil)
-  attr(:id, :string, default: nil)
-  attr(:implicit, :any, default: nil)
-  attr(:font, :any, default: nil)
-  attr(:letter_spacing, :integer, default: 0)
-  attr(:rest, :global)
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :theme_colors, :map, default: %{}
+  attr :background, :any, default: nil
+  attr :gradient_from, :any, default: nil
+  attr :gradient_to, :any, default: nil
+  attr :animation_frozen_now, :any, default: nil
+  attr :shimmer_base, :any, default: nil
+  attr :shimmer_highlight, :any, default: nil
+  attr :id, :string, default: nil
+  attr :implicit, :any, default: nil
+  attr :font, :any, default: nil
+  attr :letter_spacing, :integer, default: 0
+  attr :rest, :global
   slot(:inner_block, required: true)
 
   def h3(assigns) do

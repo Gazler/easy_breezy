@@ -5,26 +5,15 @@ defmodule EasyBreezy.Components.Mermaid do
 
   import Breeze.Blocks
 
-  attr(:id, :string, default: "mermaid-diagram")
-  attr(:source, :string, required: true)
-  attr(:width, :integer, required: true)
-  attr(:height, :integer, required: true)
-  attr(:render_context, :map, default: %{})
+  attr :id, :string, default: "mermaid-diagram"
+  attr :source, :string, required: true
+  attr :width, :integer, required: true
+  attr :height, :integer, required: true
+  attr :render_context, :map, default: %{}
 
   def mermaid(assigns) do
-    ansi_restore =
-      assigns.render_context
-      |> Map.get(:theme_colors, %{})
-      |> ansi_restore()
-
     {class, lines} =
-      case EasyBreezy.Mermaid.render(assigns.source, assigns.width, assigns.height,
-             truncate?: false,
-             ansi_restore: ansi_restore
-           ) do
-        {:ok, lines} -> {"text-secondary", lines}
-        {:error, reason} -> {"text-muted", ["Unsupported Mermaid subset", "", reason]}
-      end
+      render_lines(assigns.source, assigns.width, assigns.height, assigns.render_context)
 
     assigns =
       assigns
@@ -37,6 +26,21 @@ defmodule EasyBreezy.Components.Mermaid do
       <box :for={line <- @lines} class={@class}>{line}</box>
     </.scroll>
     """
+  end
+
+  def render_lines(source, width, height \\ 1, render_context \\ %{}) do
+    ansi_restore =
+      render_context
+      |> Map.get(:theme_colors, %{})
+      |> ansi_restore()
+
+    case EasyBreezy.Mermaid.render(source, width, height,
+           truncate?: false,
+           ansi_restore: ansi_restore
+         ) do
+      {:ok, lines} -> {"text-secondary", lines}
+      {:error, reason} -> {"text-muted", ["Unsupported Mermaid subset", "", reason]}
+    end
   end
 
   defp ansi_restore(%{secondary: {red, green, blue}, panel: {br, bg, bb}}) do

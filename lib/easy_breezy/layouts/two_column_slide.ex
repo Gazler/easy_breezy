@@ -6,23 +6,23 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
   import EasyBreezy.Components.Mermaid
   import EasyBreezy.Layouts.Helpers
 
-  attr(:title, :string, required: true)
-  attr(:left_title, :string, default: nil)
-  attr(:left_items, :list, default: [])
-  attr(:left_lines, :list, default: [])
-  attr(:left_mode, :atom, default: :text)
-  attr(:left_path, :string, default: nil)
-  attr(:left_mermaid_source, :string, default: nil)
-  attr(:right_title, :string, default: nil)
-  attr(:right_lines, :list, default: [])
-  attr(:right_notice, :string, default: nil)
-  attr(:right_mode, :atom, default: :text)
-  attr(:right_path, :string, default: nil)
-  attr(:right_mermaid_source, :string, default: nil)
-  attr(:step, :integer, required: true)
-  attr(:body_width, :integer, required: true)
-  attr(:body_height, :integer, required: true)
-  attr(:render_context, :map, default: %{})
+  attr :title, :string, required: true
+  attr :left_title, :string, default: nil
+  attr :left_items, :list, default: []
+  attr :left_lines, :list, default: []
+  attr :left_mode, :atom, default: :text
+  attr :left_path, :string, default: nil
+  attr :left_mermaid_source, :string, default: nil
+  attr :right_title, :string, default: nil
+  attr :right_lines, :list, default: []
+  attr :right_notice, :string, default: nil
+  attr :right_mode, :atom, default: :text
+  attr :right_path, :string, default: nil
+  attr :right_mermaid_source, :string, default: nil
+  attr :step, :integer, required: true
+  attr :body_width, :integer, required: true
+  attr :body_height, :integer, required: true
+  attr :render_context, :map, default: %{}
 
   def two_column_slide(assigns) do
     left_items = Map.get(assigns, :left_items, [])

@@ -185,6 +185,7 @@ defmodule EasyBreezy.Mermaid do
         {node_lines, positions} = render_td_layer(ids, graph, width, ansi_restore)
         %{lines: node_lines, positions: positions}
       end)
+      |> align_single_node_layers(graph)
 
     rendered_layers
     |> Enum.with_index()
@@ -250,6 +251,69 @@ defmodule EasyBreezy.Mermaid do
 
     {lines, positions}
   end
+
+  defp align_single_node_layers(rendered_layers, graph) do
+    rendered_layers
+    |> Enum.reduce([], fn layer, aligned_layers ->
+      case List.last(aligned_layers) do
+        nil -> [layer]
+        previous -> aligned_layers ++ [align_single_node_layer(previous, layer, graph)]
+      end
+    end)
+  end
+
+  defp align_single_node_layer(previous, current, graph) do
+    incoming_edges = td_edges(previous.positions, current.positions, graph)
+
+    with true <- map_size(previous.positions) == 1,
+         true <- map_size(current.positions) == 1,
+         [edge] <- incoming_edges,
+         %{center: source_center} <- Map.get(previous.positions, edge.from),
+         %{center: target_center} <- Map.get(current.positions, edge.to) do
+      shift = source_center - target_center
+
+      if shift != 0 and abs(shift) <= 2 and can_shift_layer?(current, shift) do
+        shift_layer(current, shift)
+      else
+        current
+      end
+    else
+      _ -> current
+    end
+  end
+
+  defp can_shift_layer?(%{positions: positions}, shift) when shift < 0 do
+    Enum.all?(positions, fn {_id, %{left: left}} -> left + shift >= 0 end)
+  end
+
+  defp can_shift_layer?(_layer, _shift), do: true
+
+  defp shift_layer(layer, shift) do
+    %{
+      layer
+      | lines: Enum.map(layer.lines, &shift_line(&1, shift)),
+        positions:
+          Map.new(layer.positions, fn {id, position} ->
+            {id, %{position | left: position.left + shift, center: position.center + shift}}
+          end)
+    }
+  end
+
+  defp shift_line(line, shift) when shift > 0, do: spaces(shift) <> line
+
+  defp shift_line(line, shift) when shift < 0 do
+    remove_leading_spaces(line, -shift)
+  end
+
+  defp shift_line(line, _shift), do: line
+
+  defp remove_leading_spaces(line, 0), do: line
+
+  defp remove_leading_spaces(" " <> rest, count) do
+    remove_leading_spaces(rest, count - 1)
+  end
+
+  defp remove_leading_spaces(line, _count), do: line
 
   defp render_td_connectors(previous, current, graph, width) do
     edges = td_edges(previous, current, graph)

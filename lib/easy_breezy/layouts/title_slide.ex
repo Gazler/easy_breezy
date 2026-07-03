@@ -5,13 +5,13 @@ defmodule EasyBreezy.Layouts.TitleSlide do
 
   import EasyBreezy.Typography
 
-  attr(:slide_id, :any, default: nil)
-  attr(:title, :string, required: true)
-  attr(:subtitle, :string, default: nil)
-  attr(:speaker, :string, default: nil)
-  attr(:footer, :string, default: nil)
-  attr(:font, :any, default: nil)
-  attr(:render_context, :map, default: %{})
+  attr :slide_id, :any, default: nil
+  attr :title, :string, required: true
+  attr :subtitle, :string, default: nil
+  attr :speaker, :string, default: nil
+  attr :footer, :string, default: nil
+  attr :font, :any, default: nil
+  attr :render_context, :map, default: %{}
 
   def title_slide(assigns) do
     assigns =
@@ -46,6 +46,7 @@ defmodule EasyBreezy.Layouts.TitleSlide do
 
     ~H"""
     <box class="grid grid-cols-1 grid-rows-3 width-full height-full">
+      {@title}
       <box>
         <.h1
           id={@title_gradient_id}

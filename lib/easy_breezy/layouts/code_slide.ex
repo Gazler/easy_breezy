@@ -8,15 +8,6 @@ defmodule EasyBreezy.Layouts.CodeSlide do
   alias BackBreeze.VirtualText
   alias Breeze.Theme
 
-  attr(:title, :string, required: true)
-  attr(:language, :string, default: "text")
-  attr(:source, :string, required: true)
-  attr(:path, :string, default: nil)
-  attr(:focus_ranges, :list, default: [])
-  attr(:body_width, :integer, required: true)
-  attr(:body_height, :integer, required: true)
-  attr(:render_context, :map, default: %{})
-
   def lumis_theme_name(:system16), do: "github_dark_dimmed"
   def lumis_theme_name(:system), do: "github_dark_dimmed"
   def lumis_theme_name(:nebula), do: "cyberdream_dark"
@@ -42,6 +33,15 @@ defmodule EasyBreezy.Layouts.CodeSlide do
       focus_ranges || []
     end
   end
+
+  attr :title, :string, required: true
+  attr :language, :string, default: "text"
+  attr :source, :string, required: true
+  attr :path, :string, default: nil
+  attr :focus_ranges, :list, default: []
+  attr :body_width, :integer, required: true
+  attr :body_height, :integer, required: true
+  attr :render_context, :map, default: %{}
 
   def code_slide(assigns) do
     fade = Map.get(assigns.render_context, :fade, 0)

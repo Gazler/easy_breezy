@@ -3,12 +3,12 @@ defmodule EasyBreezy.Layouts.PresenterSlide do
 
   use Breeze.View
 
-  attr(:title, :string, required: true)
-  attr(:items, :list, required: true)
-  attr(:notes, :list, required: true)
-  attr(:step, :integer, required: true)
-  attr(:body_height, :integer, required: true)
-  attr(:render_context, :map, default: %{})
+  attr :title, :string, required: true
+  attr :items, :list, required: true
+  attr :notes, :list, required: true
+  attr :step, :integer, required: true
+  attr :body_height, :integer, required: true
+  attr :render_context, :map, default: %{}
 
   def presenter_slide(assigns) do
     visible_items = Enum.take(assigns.items, assigns.step + 1)
