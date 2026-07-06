@@ -9,9 +9,9 @@ defmodule EasyBreezy.Slideshow do
   @themes Theme.default_cycle()
 
   def mount(opts, term) do
-    deck = Keyword.fetch!(opts, :deck)
-
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
+    body_width = max(screen_width - 6, 20)
+    deck = opts |> Keyword.fetch!(:deck) |> normalize_deck_steps(body_width)
 
     term =
       term
@@ -275,6 +275,32 @@ defmodule EasyBreezy.Slideshow do
   defp live_terminal?(%Termite.Terminal{adapter: nil}), do: false
   defp live_terminal?(%Termite.Terminal{}), do: true
   defp live_terminal?(_terminal), do: false
+
+  defp normalize_deck_steps(%{slides: slides} = deck, body_width) do
+    %{deck | slides: Enum.map(slides, &normalize_slide_steps(&1, body_width))}
+  end
+
+  defp normalize_slide_steps(
+         %EasyBreezy.Slide{layout: :code, payload: payload} = slide,
+         body_width
+       ) do
+    payload
+    |> resolve_code_payload_for_steps(body_width)
+    |> Map.get(:code_focus_ranges, [])
+    |> CodeSlide.step_count()
+    |> case do
+      nil -> slide
+      steps -> %{slide | steps: steps}
+    end
+  end
+
+  defp normalize_slide_steps(slide, _body_width), do: slide
+
+  defp resolve_code_payload_for_steps(payload, body_width) when is_function(payload, 2) do
+    payload.(body_width, 0)
+  end
+
+  defp resolve_code_payload_for_steps(payload, _body_width), do: payload
 
   defp maybe_register_presentation(%{assigns: %{presenter_mode: :presentation}} = term) do
     EasyBreezy.PresenterSync.register(term.assigns.presenter_sync_name)

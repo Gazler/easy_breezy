@@ -102,8 +102,18 @@ defmodule EasyBreezy.Examples.BreezeDeck do
           id: :code,
           title: "Code Slides",
           layout: :code,
-          payload: &code_payload/2,
-          steps: 2,
+          payload: %{
+            title: "Code Slides",
+            code_language: "elixir",
+            code_source: File.read!(Path.expand("counter.ex", __DIR__)),
+            code_path: "examples/counter.ex",
+            code_focus_ranges: [
+              [],
+              [{4, 6}],
+              [{8, 14}],
+              [{17, 19}, {21, 23}]
+            ]
+          },
           transition: :slide
         },
         %Slide{
@@ -162,20 +172,6 @@ defmodule EasyBreezy.Examples.BreezeDeck do
 
     wrapped_lines ++ Enum.map(wrap_code_line(path, width), &{"text-muted", &1})
   end
-
-  defp code_payload(_body_width, step) do
-    %{
-      title: "Code Slides",
-      code_language: "elixir",
-      code_source: File.read!(Path.expand("counter.ex", __DIR__)),
-      code_path: "examples/counter.ex",
-      code_focus_ranges: code_focus_ranges(step)
-    }
-  end
-
-  defp code_focus_ranges(0), do: []
-  defp code_focus_ranges(1), do: [{10, 19}]
-  defp code_focus_ranges(_step), do: [{21, 27}]
 
   defp wrap_code_line("", _width), do: [""]
 

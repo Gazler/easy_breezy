@@ -27,11 +27,28 @@ defmodule EasyBreezy.Layouts.CodeSlide do
   def lumis_theme_name(:solarized_light), do: "solarized_spring_light"
   def lumis_theme_name(_theme_name), do: "github_dark_dimmed"
 
+  def step_count(focus_ranges) do
+    if step_indexed_focus_ranges?(focus_ranges) do
+      max(length(focus_ranges) - 1, 0)
+    else
+      nil
+    end
+  end
+
+  def focus_ranges_for_step(focus_ranges, step) do
+    if step_indexed_focus_ranges?(focus_ranges) do
+      Enum.at(focus_ranges, max(step, 0), List.last(focus_ranges) || [])
+    else
+      focus_ranges || []
+    end
+  end
+
   def code_slide(assigns) do
     fade = Map.get(assigns.render_context, :fade, 0)
     code_theme = Map.get(assigns.render_context, :code_theme, "github_dark")
     theme_colors = Map.get(assigns.render_context, :theme_colors, %{})
     transition? = Map.get(assigns.render_context, :transition?, false)
+    viewport_height = code_viewport_height(assigns.body_height, assigns.path)
 
     snapshot_key =
       render_snapshot_key(
@@ -41,7 +58,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
         theme_colors,
         assigns.focus_ranges,
         assigns.body_width,
-        assigns.body_height
+        viewport_height
       )
 
     snapshot =
@@ -55,7 +72,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
           theme_colors,
           assigns.focus_ranges,
           assigns.body_width,
-          assigns.body_height
+          viewport_height
         )
       end)
 
@@ -82,9 +99,10 @@ defmodule EasyBreezy.Layouts.CodeSlide do
       |> assign(transition_content: snapshot.virtual_content)
       |> assign(
         transition_content_class:
-          "height-full overflow-hidden bg-panel offset-top-#{snapshot.target_scroll_y}"
+          code_content_class("height-full overflow-hidden bg-panel", snapshot.target_scroll_y)
       )
       |> assign(rendered_lines: rendered_lines)
+      |> assign(scrolled?: snapshot.target_scroll_y > 0)
       |> assign(gutter_left: snapshot.gutter_left)
       |> assign(target_scroll_y: snapshot.target_scroll_y)
       |> assign(chrome_fade: chrome_fade)
@@ -95,6 +113,13 @@ defmodule EasyBreezy.Layouts.CodeSlide do
         panel_style:
           fade_panel_style(theme_colors, fade, %{
             border_color: fade_border_color(theme_colors, chrome_fade)
+          })
+      )
+      |> assign(
+        scroll_panel_style:
+          fade_panel_style(theme_colors, fade, %{
+            border_color: fade_border_color(theme_colors, chrome_fade),
+            scrollbar: code_scrollbar_style(theme_colors, chrome_fade)
           })
       )
 
@@ -108,16 +133,28 @@ defmodule EasyBreezy.Layouts.CodeSlide do
           ┴
         </box>
         <.scroll
-          :if={!@transition?}
-          id="slide-code"
+          :if={!@transition? && !@scrolled?}
+          id="slide-code-top"
           class="height-full overflow-scroll bg-panel"
-          style={@panel_style}
-          scroll-offset-y={@target_scroll_y}
+          style={@scroll_panel_style}
         >
           <box :for={line <- @rendered_lines} id={line.id} class="width-full" style={line.style}>
             {line.content}
           </box>
         </.scroll>
+        <box
+          :if={!@transition? && @scrolled?}
+          id={"slide-code-focus-#{@target_scroll_y}"}
+          focusable
+          implicit={EasyBreezy.Layouts.CodeSlide.FocusScroll}
+          scroll-target-y={@target_scroll_y}
+          class="height-full overflow-scroll bg-panel"
+          style={@scroll_panel_style}
+        >
+          <box :for={line <- @rendered_lines} id={line.id} class="width-full" style={line.style}>
+            {line.content}
+          </box>
+        </box>
         <box :if={@transition?} class={@transition_content_class} style={@panel_style}>
           {@transition_content}
         </box>
@@ -146,7 +183,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
         theme_colors,
         focus_ranges,
         body_width,
-        body_height
+        viewport_height
       ) do
     source_lines = split_code_lines(source)
     total_lines = length(source_lines)
@@ -198,14 +235,30 @@ defmodule EasyBreezy.Layouts.CodeSlide do
             theme_colors,
             focus_ranges,
             body_width,
-            body_height
+            viewport_height
           )
         ),
       focus_active?: focus_active?,
       gutter_left: line_number_width + 2,
-      target_scroll_y: code_target_scroll_y(focus_ranges, total_lines, body_height)
+      target_scroll_y: code_target_scroll_y(focus_ranges, total_lines, viewport_height)
     }
   end
+
+  def code_viewport_height(body_height, path) do
+    title_height = 1
+    path_height = if path in [nil, ""], do: 0, else: 1
+    panel_border_height = 2
+
+    body_height
+    |> Kernel.-(title_height + path_height + panel_border_height)
+    |> max(1)
+  end
+
+  defp code_content_class(base, scroll_y) when is_integer(scroll_y) and scroll_y > 0 do
+    "#{base} offset-top-#{scroll_y}"
+  end
+
+  defp code_content_class(base, _scroll_y), do: base
 
   defp split_code_lines(source) do
     lines = String.split(source, "\n", trim: false)
@@ -403,6 +456,30 @@ defmodule EasyBreezy.Layouts.CodeSlide do
     end
   end
 
+  defp code_scrollbar_style(theme_colors, amount) do
+    panel = Map.get(theme_colors, :panel)
+    stroke = fade_border_color(theme_colors, amount) || Map.get(theme_colors, :stroke)
+
+    %{
+      arrows: %{
+        foreground_color: stroke,
+        background_color: panel
+      },
+      thumb: %{
+        foreground_color: stroke,
+        background_color: panel
+      },
+      track: %{
+        foreground_color: stroke,
+        background_color: panel
+      },
+      intersection: %{
+        foreground_color: stroke,
+        background_color: panel
+      }
+    }
+  end
+
   defp rgb_to_hex(r, g, b) do
     "#" <>
       String.pad_leading(Integer.to_string(r, 16), 2, "0") <>
@@ -410,10 +487,14 @@ defmodule EasyBreezy.Layouts.CodeSlide do
       String.pad_leading(Integer.to_string(b, 16), 2, "0")
   end
 
-  defp normalize_focus_ranges(ranges) do
-    Enum.flat_map(ranges, fn
-      {first, last} when is_integer(first) and is_integer(last) and first <= last ->
-        [{first, last}]
+  defp normalize_focus_ranges(ranges) when is_list(ranges) do
+    ranges
+    |> Enum.flat_map(fn
+      first..last//_step when is_integer(first) and is_integer(last) ->
+        [ordered_range(first, last)]
+
+      {first, last} when is_integer(first) and is_integer(last) ->
+        [ordered_range(first, last)]
 
       line when is_integer(line) ->
         [{line, line}]
@@ -421,7 +502,34 @@ defmodule EasyBreezy.Layouts.CodeSlide do
       _ ->
         []
     end)
+    |> Enum.reject(fn {first, last} -> first < 1 or last < 1 end)
+    |> Enum.sort_by(fn {first, last} -> {first, last} end)
+    |> merge_focus_ranges()
   end
+
+  defp normalize_focus_ranges(_ranges), do: []
+
+  defp ordered_range(first, last) when first <= last, do: {first, last}
+  defp ordered_range(first, last), do: {last, first}
+
+  defp merge_focus_ranges(ranges) do
+    ranges
+    |> Enum.reduce([], fn
+      {first, last}, [{previous_first, previous_last} | rest]
+      when first <= previous_last + 1 ->
+        [{previous_first, max(previous_last, last)} | rest]
+
+      range, acc ->
+        [range | acc]
+    end)
+    |> Enum.reverse()
+  end
+
+  defp step_indexed_focus_ranges?(ranges) when is_list(ranges) do
+    ranges != [] and Enum.all?(ranges, &is_list/1)
+  end
+
+  defp step_indexed_focus_ranges?(_ranges), do: false
 
   defp line_in_ranges?(_line_number, []), do: false
 
@@ -499,17 +607,53 @@ defmodule EasyBreezy.Layouts.CodeSlide do
     |> String.length()
   end
 
-  defp code_target_scroll_y([], _total_lines, _body_height), do: 0
+  defp code_target_scroll_y([], _total_lines, _viewport_height), do: 0
 
-  defp code_target_scroll_y(ranges, total_lines, body_height) do
+  defp code_target_scroll_y(ranges, total_lines, viewport_height) do
     {first, last} = hd(ranges)
-    focus_center = div(first + last, 2) - 1
-    viewport_height = max(body_height - 2, 1)
+    viewport_height = max(viewport_height, 1)
     max_scroll = max(total_lines - viewport_height, 0)
+    focus_height = last - first + 1
 
-    focus_center
-    |> Kernel.-(div(viewport_height, 2))
+    if focus_height > viewport_height do
+      first - 1
+    else
+      div(first + last, 2) - 1 - div(viewport_height, 2)
+    end
     |> max(0)
     |> min(max_scroll)
+  end
+end
+
+defmodule EasyBreezy.Layouts.CodeSlide.FocusScroll do
+  @moduledoc false
+
+  alias Breeze.Viewport
+
+  def init(_children, root_attrs, _last_state) do
+    {:ok, %{offset_y: scroll_target(root_attrs)}, requires_layout_rerender: true}
+  end
+
+  def handle_event(_, _, state), do: {:noreply, state}
+
+  def handle_modifiers(:root, flags, state) do
+    [scroll_y: effective_offset_y(state, Keyword.get(flags, :layout_element))]
+  end
+
+  def handle_modifiers(:child, _flags, _state), do: []
+
+  defp effective_offset_y(state, nil), do: Map.get(state, :offset_y, 0)
+
+  defp effective_offset_y(state, %Viewport{} = viewport) do
+    state
+    |> Map.get(:offset_y, 0)
+    |> Viewport.clamp_scroll_y(viewport)
+  end
+
+  defp scroll_target(attrs) do
+    case Map.get(attrs, :"scroll-target-y", 0) do
+      value when is_integer(value) and value > 0 -> value
+      _other -> 0
+    end
   end
 end

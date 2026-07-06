@@ -109,6 +109,42 @@ defmodule EasyBreezy.SlideshowTransitionTest do
     assert_snapshot(Breeze.Test.render!(session), "easy_breezy/code_slide_transition.ansi")
   end
 
+  test "pages backward into the final code focus step" do
+    session =
+      Breeze.Test.start!(EasyBreezy.Slideshow,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [
+          deck: code_backward_transition_deck(),
+          slide_index: 2,
+          themes: [:nebula],
+          theme: :nebula
+        ]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    _initial_render = Breeze.Test.render!(session)
+
+    metadata = Breeze.Test.metadata(session)
+    code_slide = Enum.at(metadata.assigns.deck.slides, 1)
+    assert code_slide.steps == 2
+
+    assert {:noreply, _focused, true} =
+             Breeze.Test.event(session, nil, %{"key" => "ArrowLeft"})
+
+    metadata = Breeze.Test.metadata(session)
+
+    assert transition = metadata.assigns.transition
+    assert transition.direction == :backward
+    assert transition.to_index == 1
+    assert transition.to_step == 2
+    assert map_size(transition.code_slide_snapshots) == 1
+
+    [snapshot] = Map.values(transition.code_slide_snapshots)
+    assert snapshot.target_scroll_y == 16
+  end
+
   defp title_gradient(implicit_state) do
     Enum.find(implicit_state, fn
       {"title-gradient-" <> _, {EasyBreezy.Implicit.TitleGradient, _state}} -> true
@@ -146,6 +182,47 @@ defmodule EasyBreezy.SlideshowTransitionTest do
           payload: %{
             title: "Next",
             items: ["The title slide is transitioning out."]
+          },
+          transition: :slide
+        }
+      ]
+    }
+  end
+
+  defp code_backward_transition_deck do
+    %Deck{
+      title: "Code Transition Deck",
+      slides: [
+        %Slide{
+          id: :intro,
+          title: "Intro",
+          layout: :bullets,
+          payload: %{
+            title: "Intro",
+            items: ["The next slide contains highlighted code."]
+          },
+          transition: :slide
+        },
+        %Slide{
+          id: :code,
+          title: "Code",
+          layout: :code,
+          payload: %{
+            title: "Code Slide",
+            code_language: "elixir",
+            code_source: Enum.map_join(1..30, "\n", &"line_#{&1} = #{&1}"),
+            code_path: "examples/generated.ex",
+            code_focus_ranges: [[], [{10, 12}], [{25, 27}]]
+          },
+          transition: :slide
+        },
+        %Slide{
+          id: :after,
+          title: "After",
+          layout: :bullets,
+          payload: %{
+            title: "After",
+            items: ["The previous slide contains highlighted code."]
           },
           transition: :slide
         }

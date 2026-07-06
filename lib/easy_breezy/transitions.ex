@@ -225,7 +225,13 @@ defmodule EasyBreezy.Transitions do
 
     if is_binary(source) do
       language = Map.get(payload, :code_language) || "text"
-      focus_ranges = Map.get(payload, :code_focus_ranges, [])
+
+      focus_ranges =
+        payload
+        |> Map.get(:code_focus_ranges, [])
+        |> CodeSlide.focus_ranges_for_step(step)
+
+      viewport_height = CodeSlide.code_viewport_height(body_height, Map.get(payload, :code_path))
 
       key =
         CodeSlide.render_snapshot_key(
@@ -235,7 +241,7 @@ defmodule EasyBreezy.Transitions do
           theme_colors,
           focus_ranges,
           body_width,
-          body_height
+          viewport_height
         )
 
       snapshot =
@@ -246,7 +252,7 @@ defmodule EasyBreezy.Transitions do
           theme_colors,
           focus_ranges,
           body_width,
-          body_height
+          viewport_height
         )
 
       Map.put(snapshots, key, snapshot)
