@@ -3,6 +3,8 @@ defmodule EasyBreezy.Transitions do
 
   use Breeze.View
 
+  alias EasyBreezy.Layouts.CodeSlide
+
   import EasyBreezy.Layouts
 
   @slide_transition_duration_ms 200
@@ -88,6 +90,7 @@ defmodule EasyBreezy.Transitions do
     frames = transition_frame_count(direction, distance)
     interval_ms = transition_interval_ms(direction, distance, frames)
     frozen_now = System.monotonic_time(:millisecond)
+    code_slide_snapshots = code_slide_snapshots(term, to_index, to_step, body_width, body_height)
 
     Process.send_after(self(), :transition_tick, interval_ms)
 
@@ -102,7 +105,8 @@ defmodule EasyBreezy.Transitions do
         frame: 0,
         frames: frames,
         interval_ms: interval_ms,
-        animation_frozen_now: frozen_now
+        animation_frozen_now: frozen_now,
+        code_slide_snapshots: code_slide_snapshots
       }
     )
   end
@@ -171,15 +175,104 @@ defmodule EasyBreezy.Transitions do
   defp transition_render_context(render_context, transition) when is_map(render_context) do
     render_context
     |> Map.put(:animate_title_gradient?, true)
+    |> Map.put(:transition?, true)
+    |> Map.put(:code_slide_snapshots, Map.get(transition, :code_slide_snapshots, %{}))
     |> Map.put(:animation_frozen_now, Map.get(transition, :animation_frozen_now))
   end
 
   defp transition_render_context(_render_context, transition) do
     %{
       animate_title_gradient?: true,
+      transition?: true,
+      code_slide_snapshots: Map.get(transition, :code_slide_snapshots, %{}),
       animation_frozen_now: Map.get(transition, :animation_frozen_now)
     }
   end
+
+  defp code_slide_snapshots(term, to_index, to_step, body_width, body_height) do
+    theme_colors = term.assigns.theme_colors
+    code_theme = term.assigns.code_theme
+    slides = term.assigns.deck.slides
+
+    [
+      {Enum.at(slides, term.assigns.slide_index), term.assigns.step},
+      {Enum.at(slides, to_index), to_step}
+    ]
+    |> Enum.reduce(%{}, fn {slide, step}, snapshots ->
+      put_code_slide_snapshot(
+        snapshots,
+        slide,
+        body_width,
+        body_height,
+        step,
+        code_theme,
+        theme_colors
+      )
+    end)
+  end
+
+  defp put_code_slide_snapshot(
+         snapshots,
+         %{layout: :code} = slide,
+         body_width,
+         body_height,
+         step,
+         code_theme,
+         theme_colors
+       ) do
+    payload = resolve_slide_payload(slide, body_width, step)
+    source = Map.get(payload, :code_source)
+
+    if is_binary(source) do
+      language = Map.get(payload, :code_language) || "text"
+      focus_ranges = Map.get(payload, :code_focus_ranges, [])
+
+      key =
+        CodeSlide.render_snapshot_key(
+          source,
+          language,
+          code_theme,
+          theme_colors,
+          focus_ranges,
+          body_width,
+          body_height
+        )
+
+      snapshot =
+        CodeSlide.render_snapshot(
+          source,
+          language,
+          code_theme,
+          theme_colors,
+          focus_ranges,
+          body_width,
+          body_height
+        )
+
+      Map.put(snapshots, key, snapshot)
+    else
+      snapshots
+    end
+  end
+
+  defp put_code_slide_snapshot(
+         snapshots,
+         _slide,
+         _body_width,
+         _body_height,
+         _step,
+         _code_theme,
+         _theme_colors
+       ),
+       do: snapshots
+
+  defp resolve_slide_payload(%{payload: payload}, body_width, step) when is_function(payload, 2),
+    do: payload.(body_width, step)
+
+  defp resolve_slide_payload(%{payload: payload}, _body_width, _step) when is_map(payload),
+    do: payload
+
+  defp resolve_slide_payload(_slide, _body_width, _step), do: %{}
 
   defp transition_positions(:forward, body_width, _body_height, distance),
     do: {-distance, 0, body_width - distance, 0}

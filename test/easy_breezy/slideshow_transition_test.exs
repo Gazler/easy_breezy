@@ -1,5 +1,6 @@
 defmodule EasyBreezy.SlideshowTransitionTest do
   use ExUnit.Case, async: false
+  use Breeze.SnapshotAssertions
 
   alias EasyBreezy.{Deck, Slide}
 
@@ -78,6 +79,36 @@ defmodule EasyBreezy.SlideshowTransitionTest do
            ) == frozen_shimmer_frame
   end
 
+  test "snapshots highlighted code once for transition frames" do
+    session =
+      Breeze.Test.start!(EasyBreezy.Slideshow,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [
+          deck: code_transition_deck(),
+          themes: [:nebula],
+          theme: :nebula
+        ]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    _initial_render = Breeze.Test.render!(session)
+
+    assert {:noreply, _focused, true} =
+             Breeze.Test.event(session, nil, %{"key" => "ArrowRight"})
+
+    metadata = Breeze.Test.metadata(session)
+    assert transition = metadata.assigns.transition
+    assert map_size(transition.code_slide_snapshots) == 1
+
+    for _ <- 1..div(transition.frames, 2) do
+      send(session.pid, :transition_tick)
+    end
+
+    assert_snapshot(Breeze.Test.render!(session), "easy_breezy/code_slide_transition.ansi")
+  end
+
   defp title_gradient(implicit_state) do
     Enum.find(implicit_state, fn
       {"title-gradient-" <> _, {EasyBreezy.Implicit.TitleGradient, _state}} -> true
@@ -115,6 +146,45 @@ defmodule EasyBreezy.SlideshowTransitionTest do
           payload: %{
             title: "Next",
             items: ["The title slide is transitioning out."]
+          },
+          transition: :slide
+        }
+      ]
+    }
+  end
+
+  defp code_transition_deck do
+    %Deck{
+      title: "Code Transition Deck",
+      slides: [
+        %Slide{
+          id: :intro,
+          title: "Intro",
+          layout: :bullets,
+          payload: %{
+            title: "Intro",
+            items: ["The next slide contains highlighted code."]
+          },
+          transition: :slide
+        },
+        %Slide{
+          id: :code,
+          title: "Code",
+          layout: :code,
+          payload: %{
+            title: "Code Slide",
+            code_language: "elixir",
+            code_source: """
+            defmodule Counter do
+              use Breeze.View
+
+              def mount(_opts, term) do
+                {:ok, assign(term, count: 0)}
+              end
+            end
+            """,
+            code_path: "examples/counter.ex",
+            code_focus_ranges: [{4, 5}]
           },
           transition: :slide
         }

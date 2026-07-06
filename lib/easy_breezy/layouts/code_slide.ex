@@ -5,6 +5,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
 
   import Breeze.Blocks
 
+  alias BackBreeze.VirtualText
   alias Breeze.Theme
 
   attr(:title, :string, required: true)
@@ -30,55 +31,62 @@ defmodule EasyBreezy.Layouts.CodeSlide do
     fade = Map.get(assigns.render_context, :fade, 0)
     code_theme = Map.get(assigns.render_context, :code_theme, "github_dark")
     theme_colors = Map.get(assigns.render_context, :theme_colors, %{})
-    source_lines = split_code_lines(assigns.source)
-    total_lines = length(source_lines)
-    line_number_width = total_lines |> max(1) |> Integer.digits() |> length()
-    gutter_left = line_number_width + 2
+    transition? = Map.get(assigns.render_context, :transition?, false)
 
-    highlighted_lines =
-      highlight_code_lines(assigns.source, assigns.language, code_theme, theme_colors)
+    snapshot_key =
+      render_snapshot_key(
+        assigns.source,
+        assigns.language,
+        code_theme,
+        theme_colors,
+        assigns.focus_ranges,
+        assigns.body_width,
+        assigns.body_height
+      )
 
-    focus_ranges = normalize_focus_ranges(assigns.focus_ranges)
-    focus_active? = focus_ranges != []
-    target_scroll_y = code_target_scroll_y(focus_ranges, total_lines, assigns.body_height)
-
-    rendered_lines =
-      source_lines
-      |> Enum.with_index(1)
-      |> Enum.map(fn {raw_line, line_number} ->
-        highlighted_line = Enum.at(highlighted_lines, line_number - 1, raw_line)
-        focused? = line_in_ranges?(line_number, focus_ranges)
-
-        %{
-          id: "slide-code-#{line_number}",
-          content:
-            format_code_line(
-              line_number,
-              line_number_width,
-              assigns.body_width,
-              maybe_dim_code_line_content(
-                highlighted_line,
-                theme_colors,
-                focus_active?,
-                focused?
-              ),
-              theme_colors,
-              focus_active?,
-              focused?
-            ),
-          style: code_line_style(theme_colors, fade, focus_active?, focused?)
-        }
+    snapshot =
+      assigns.render_context
+      |> Map.get(:code_slide_snapshots, %{})
+      |> Map.get_lazy(snapshot_key, fn ->
+        render_snapshot(
+          assigns.source,
+          assigns.language,
+          code_theme,
+          theme_colors,
+          assigns.focus_ranges,
+          assigns.body_width,
+          assigns.body_height
+        )
       end)
 
-    chrome_fade = if(focus_active?, do: max(fade, 55), else: fade)
+    rendered_lines =
+      if transition? do
+        []
+      else
+        Enum.map(snapshot.lines, fn line ->
+          Map.put(
+            line,
+            :style,
+            code_line_style(theme_colors, fade, snapshot.focus_active?, line.focused?)
+          )
+        end)
+      end
+
+    chrome_fade = if(snapshot.focus_active?, do: max(fade, 55), else: fade)
 
     assigns =
       assigns
       |> assign(fade: fade)
       |> assign(theme_colors: theme_colors)
+      |> assign(transition?: transition?)
+      |> assign(transition_content: snapshot.virtual_content)
+      |> assign(
+        transition_content_class:
+          "height-full overflow-hidden bg-panel offset-top-#{snapshot.target_scroll_y}"
+      )
       |> assign(rendered_lines: rendered_lines)
-      |> assign(gutter_left: gutter_left)
-      |> assign(target_scroll_y: target_scroll_y)
+      |> assign(gutter_left: snapshot.gutter_left)
+      |> assign(target_scroll_y: snapshot.target_scroll_y)
       |> assign(chrome_fade: chrome_fade)
       |> assign(primary_style: fade_role_style(theme_colors, :primary, chrome_fade))
       |> assign(muted_style: fade_role_style(theme_colors, :muted, chrome_fade))
@@ -100,6 +108,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
           ┴
         </box>
         <.scroll
+          :if={!@transition?}
           id="slide-code"
           class="height-full overflow-scroll bg-panel"
           style={@panel_style}
@@ -109,9 +118,93 @@ defmodule EasyBreezy.Layouts.CodeSlide do
             {line.content}
           </box>
         </.scroll>
+        <box :if={@transition?} class={@transition_content_class} style={@panel_style}>
+          {@transition_content}
+        </box>
       </box>
     </box>
     """
+  end
+
+  def render_snapshot_key(
+        source,
+        language,
+        code_theme,
+        theme_colors,
+        focus_ranges,
+        body_width,
+        body_height
+      ) do
+    {__MODULE__, :render_snapshot, source, language, code_theme, theme_colors, focus_ranges,
+     body_width, body_height}
+  end
+
+  def render_snapshot(
+        source,
+        language,
+        code_theme,
+        theme_colors,
+        focus_ranges,
+        body_width,
+        body_height
+      ) do
+    source_lines = split_code_lines(source)
+    total_lines = length(source_lines)
+    line_number_width = total_lines |> max(1) |> Integer.digits() |> length()
+    highlighted_lines = highlight_code_lines(source, language, code_theme, theme_colors)
+    focus_ranges = normalize_focus_ranges(focus_ranges)
+    focus_active? = focus_ranges != []
+
+    lines =
+      source_lines
+      |> Enum.with_index(1)
+      |> Enum.map(fn {raw_line, line_number} ->
+        highlighted_line = Enum.at(highlighted_lines, line_number - 1, raw_line)
+        focused? = line_in_ranges?(line_number, focus_ranges)
+
+        %{
+          id: "slide-code-#{line_number}",
+          focused?: focused?,
+          content:
+            format_code_line(
+              line_number,
+              line_number_width,
+              body_width,
+              maybe_dim_code_line_content(
+                highlighted_line,
+                theme_colors,
+                focus_active?,
+                focused?
+              ),
+              theme_colors,
+              focus_active?,
+              focused?
+            )
+        }
+      end)
+
+    content = Enum.map_join(lines, "\n", & &1.content)
+
+    %{
+      lines: lines,
+      content: content,
+      virtual_content:
+        virtual_snapshot_content(
+          lines,
+          render_snapshot_key(
+            source,
+            language,
+            code_theme,
+            theme_colors,
+            focus_ranges,
+            body_width,
+            body_height
+          )
+        ),
+      focus_active?: focus_active?,
+      gutter_left: line_number_width + 2,
+      target_scroll_y: code_target_scroll_y(focus_ranges, total_lines, body_height)
+    }
   end
 
   defp split_code_lines(source) do
@@ -121,6 +214,28 @@ defmodule EasyBreezy.Layouts.CodeSlide do
       [] -> []
       _ -> if(List.last(lines) == "", do: Enum.drop(lines, -1), else: lines)
     end
+  end
+
+  defp virtual_snapshot_content(lines, cache_key) do
+    content_lines = Enum.map(lines, & &1.content)
+    line_count = length(content_lines)
+    intrinsic_width = Enum.reduce(content_lines, 0, &max(visible_width(&1), &2))
+    tuple_lines = List.to_tuple(content_lines)
+
+    VirtualText.lazy(
+      cache_key: {:code_slide_snapshot, :erlang.phash2(cache_key)},
+      intrinsic_width: intrinsic_width,
+      line_count_fn: fn _width -> line_count end,
+      slice_fn: fn start_line, count, _width ->
+        last_line = min(start_line + count - 1, line_count - 1)
+
+        if count <= 0 or start_line > last_line do
+          []
+        else
+          Enum.map(start_line..last_line, &elem(tuple_lines, &1))
+        end
+      end
+    )
   end
 
   defp highlight_code_lines(source, language, code_theme, theme_colors) do

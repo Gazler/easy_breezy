@@ -3,8 +3,6 @@ defmodule EasyBreezy.Layouts.PresenterSlide do
 
   use Breeze.View
 
-  import EasyBreezy.Layouts.Helpers
-
   attr(:title, :string, required: true)
   attr(:items, :list, required: true)
   attr(:notes, :list, required: true)
@@ -15,8 +13,8 @@ defmodule EasyBreezy.Layouts.PresenterSlide do
   def presenter_slide(assigns) do
     visible_items = Enum.take(assigns.items, assigns.step + 1)
     visible_notes = Enum.take(assigns.notes, assigns.step + 1)
-    item_lines = Enum.map(visible_items, &bullet_line(&1, 28))
-    note_lines = Enum.map(visible_notes, &bullet_line(&1, 28))
+    item_lines = Enum.map(visible_items, &("• " <> to_string(&1)))
+    note_lines = Enum.map(visible_notes, &("• " <> to_string(&1)))
     panel_height = max(assigns.body_height, 4)
 
     assigns =
@@ -36,13 +34,13 @@ defmodule EasyBreezy.Layouts.PresenterSlide do
           <box class="bold text-secondary"> Audience sees </box>
           <box>
           </box>
-          <box :for={line <- @item_lines}>{line}</box>
+          <box :for={line <- @item_lines} class="width-full">{line}</box>
         </box>
         <box style={@panel_style} class="border-rounded border border-stroke bg-panel">
           <box class="bold text-secondary"> Presenter notes </box>
           <box>
           </box>
-          <box :for={line <- @note_lines} class="text-muted">{line}</box>
+          <box :for={line <- @note_lines} class="width-full text-muted">{line}</box>
         </box>
       </box>
     </box>
