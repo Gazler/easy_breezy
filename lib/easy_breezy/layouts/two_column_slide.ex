@@ -3,6 +3,7 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
 
   use Breeze.View
 
+  import EasyBreezy.Components.Mermaid
   import EasyBreezy.Layouts.Helpers
 
   attr(:title, :string, required: true)
@@ -11,11 +12,13 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
   attr(:left_lines, :list, default: [])
   attr(:left_mode, :atom, default: :text)
   attr(:left_path, :string, default: nil)
+  attr(:left_mermaid_source, :string, default: nil)
   attr(:right_title, :string, default: nil)
   attr(:right_lines, :list, default: [])
   attr(:right_notice, :string, default: nil)
   attr(:right_mode, :atom, default: :text)
   attr(:right_path, :string, default: nil)
+  attr(:right_mermaid_source, :string, default: nil)
   attr(:step, :integer, required: true)
   attr(:body_width, :integer, required: true)
   attr(:body_height, :integer, required: true)
@@ -25,10 +28,12 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
     left_items = Map.get(assigns, :left_items, [])
     left_lines = Map.get(assigns, :left_lines, [])
     left_mode = Map.get(assigns, :left_mode, :text)
+    left_mermaid_source = Map.get(assigns, :left_mermaid_source)
     left_path = Map.get(assigns, :left_path)
     left_title = Map.get(assigns, :left_title)
     right_lines = Map.get(assigns, :right_lines, [])
     right_mode = Map.get(assigns, :right_mode, :text)
+    right_mermaid_source = Map.get(assigns, :right_mermaid_source)
     right_path = Map.get(assigns, :right_path)
     right_title = Map.get(assigns, :right_title)
 
@@ -44,7 +49,7 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
     left_lines =
       case left_lines do
         [] -> Enum.map(left_item_lines, &{"", &1})
-        lines -> lines
+        lines -> Enum.map(lines, &normalize_line/1)
       end
 
     visible_right_lines =
@@ -61,15 +66,21 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
     image_mode? = left_mode == :image or right_mode == :image
     left_header_height = if(left_title, do: 2, else: 0)
     right_header_height = if(right_title, do: 2, else: 0)
+    left_content_height = max(panel_height - left_header_height - 2, 1)
+    right_content_height = max(panel_height - right_header_height - 2, 1)
+    left_mermaid_width = max(left_width - 2, 1)
+    right_mermaid_width = max(right_width - 2, 1)
 
     assigns =
       assigns
       |> assign(
         left_items: left_items,
+        left_mermaid_source: left_mermaid_source,
         left_mode: left_mode,
         left_path: left_path,
         left_title: left_title,
         right_lines: right_lines,
+        right_mermaid_source: right_mermaid_source,
         right_mode: right_mode,
         right_path: right_path,
         right_title: right_title
@@ -80,8 +91,12 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
       |> assign(right_notice: right_notice)
       |> assign(show_right_lines?: show_right_lines?)
       |> assign(panel_style: %{height: panel_height})
-      |> assign(left_image_style: %{height: max(panel_height - left_header_height, 4)})
-      |> assign(right_image_style: %{height: max(panel_height - right_header_height, 4)})
+      |> assign(left_content_height: left_content_height)
+      |> assign(right_content_height: right_content_height)
+      |> assign(left_mermaid_width: left_mermaid_width)
+      |> assign(right_mermaid_width: right_mermaid_width)
+      |> assign(left_image_style: %{height: left_content_height})
+      |> assign(right_image_style: %{height: right_content_height})
       |> assign(
         left_panel_class:
           if(image_mode?,
@@ -108,6 +123,14 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
           <box :for={{class, line} <- @left_lines} :if={@left_mode == :text} class={class}>
             {line}
           </box>
+          <.mermaid
+            :if={@left_mode == :mermaid}
+            id="slide-mermaid-left"
+            source={@left_mermaid_source || ""}
+            width={@left_mermaid_width}
+            height={@left_content_height}
+            render_context={@render_context}
+          />
           <box
             :if={@left_mode == :image}
             id="slide-image-left"
@@ -132,6 +155,14 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
           >
             {line}
           </box>
+          <.mermaid
+            :if={@right_mode == :mermaid}
+            id="slide-mermaid-right"
+            source={@right_mermaid_source || ""}
+            width={@right_mermaid_width}
+            height={@right_content_height}
+            render_context={@render_context}
+          />
           <box
             :if={@right_mode == :image}
             id="slide-image"
@@ -148,4 +179,7 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
     </box>
     """
   end
+
+  defp normalize_line({class, line}), do: {class, line}
+  defp normalize_line(line), do: {"", line}
 end

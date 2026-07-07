@@ -31,6 +31,7 @@ defmodule EasyBreezy.Layouts do
               left_title: nil,
               left_items: [],
               left_lines: [],
+              left_mermaid_source: nil,
               left_mode: :text,
               left_path: nil,
               subtitle: nil,
@@ -40,6 +41,7 @@ defmodule EasyBreezy.Layouts do
               font: nil,
               right_title: nil,
               right_lines: [],
+              right_mermaid_source: nil,
               right_notice: nil,
               right_mode: :text,
               right_path: nil,
@@ -77,10 +79,12 @@ defmodule EasyBreezy.Layouts do
       left_title={@slide_payload.left_title}
       left_items={@slide_payload.left_items}
       left_lines={@slide_payload.left_lines}
+      left_mermaid_source={@slide_payload[:left_mermaid_source]}
       left_mode={@slide_payload[:left_mode] || :text}
       left_path={@slide_payload[:left_path]}
       right_title={@slide_payload.right_title}
       right_lines={@slide_payload.right_lines}
+      right_mermaid_source={@slide_payload[:right_mermaid_source]}
       right_notice={@slide_payload[:right_notice]}
       right_mode={@slide_payload[:right_mode] || :text}
       right_path={@slide_payload[:right_path]}

@@ -99,6 +99,60 @@ defmodule EasyBreezy.Examples.BreezeDeck do
           transition: :slide
         },
         %Slide{
+          id: :mermaid,
+          title: "Mermaid Component",
+          layout: :two_column,
+          payload: %{
+            title: "Mermaid Component",
+            left_title: "Source",
+            left_lines: [
+              "flowchart TD",
+              "  classDef otpcolor color:#00ff66",
+              "  breeze --> back_breeze",
+              "  back_breeze --> termite",
+              "  termite --> otp:::otpcolor",
+              "  termite --> kino",
+              "  termite --> ssh"
+            ],
+            right_title: "Terminal render",
+            right_mode: :mermaid,
+            right_mermaid_source: """
+            flowchart TD
+              classDef otpcolor color:#00ff66
+              breeze --> back_breeze
+              back_breeze --> termite
+              termite --> otp:::otpcolor
+              termite --> kino
+              termite --> ssh
+            """
+          },
+          transition: :slide
+        },
+        %Slide{
+          id: :mermaid_shapes,
+          title: "Mermaid Shapes",
+          layout: :two_column,
+          payload: %{
+            title: "Mermaid Shapes",
+            left_title: "Source",
+            left_lines: [
+              "flowchart TD",
+              "  start(Start) --> check{Ready?}",
+              "  check -->|yes| ship(Ship it)",
+              "  check -->|no| revise[Revise]"
+            ],
+            right_title: "Terminal render",
+            right_mode: :mermaid,
+            right_mermaid_source: """
+            flowchart TD
+              start(Start) --> check{Ready?}
+              check -->|yes| ship(Ship it)
+              check -->|no| revise[Revise]
+            """
+          },
+          transition: :slide
+        },
+        %Slide{
           id: :code,
           title: "Code Slides",
           layout: :code,

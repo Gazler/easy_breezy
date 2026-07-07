@@ -27,7 +27,8 @@ defmodule EasyBreezy.MixProject do
     [
       {:breeze, github: "gazler/breeze"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
-      {:lumis, "~> 0.5.0"}
+      {:lumis, "~> 0.5.0"},
+      {:nimble_parsec, "~> 1.4"}
     ]
   end
 end
