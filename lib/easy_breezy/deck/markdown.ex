@@ -233,6 +233,11 @@ defmodule EasyBreezy.Deck.Markdown do
       "two_column" -> :two_column
       "two-cols" -> :two_column
       "split" -> :two_column
+      "breeze" -> :breeze
+      "breeze-view" -> :breeze
+      "breeze_view" -> :breeze
+      "live" -> :breeze
+      "view" -> :breeze
       layout -> String.to_atom(layout)
     end
   end
@@ -296,6 +301,20 @@ defmodule EasyBreezy.Deck.Markdown do
         %{payload | code_focus_ranges: code_focus_ranges_for_step(focus_steps, step)}
       end
     end
+  end
+
+  defp payload_for(:breeze, meta, _body, _base_path) do
+    %{
+      title: Map.get(meta, :title),
+      view: breeze_view!(Map.get(meta, :view) || Map.get(meta, :module)),
+      live_id: Map.get(meta, :live_id),
+      start_opts: Map.get(meta, :start_opts, []),
+      assigns: Map.get(meta, :assigns, %{}),
+      breeze_class:
+        Map.get(meta, :breeze_class) || Map.get(meta, :class) || "width-full height-full",
+      breeze_style: Map.get(meta, :breeze_style) || Map.get(meta, :style),
+      breeze_focusable: Map.get(meta, :breeze_focusable, Map.get(meta, :focusable, true))
+    }
   end
 
   defp payload_for(:two_column, meta, body, base_path) do
@@ -384,6 +403,32 @@ defmodule EasyBreezy.Deck.Markdown do
       _ ->
         body
     end
+  end
+
+  defp breeze_view!(nil) do
+    raise ArgumentError, "breeze slides require a `view:` frontmatter value"
+  end
+
+  defp breeze_view!(module) when is_atom(module) do
+    case Atom.to_string(module) do
+      "Elixir." <> _ -> module
+      module -> module_from_string(module)
+    end
+  end
+
+  defp breeze_view!(module) when is_binary(module) do
+    module
+    |> String.trim()
+    |> String.trim_leading(":")
+    |> module_from_string()
+  end
+
+  defp module_from_string("Elixir." <> module), do: module_from_string(module)
+
+  defp module_from_string(module) do
+    module
+    |> String.split(".", trim: true)
+    |> Module.concat()
   end
 
   defp split_slots(body) do

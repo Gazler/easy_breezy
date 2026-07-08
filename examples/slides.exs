@@ -1,6 +1,8 @@
 defmodule EasyBreezy.Examples.BreezeDeck do
   alias EasyBreezy.{Deck, Slide}
 
+  Code.require_file("counter.ex", __DIR__)
+
   def deck do
     %Deck{
       title: "Breeze",
@@ -169,6 +171,15 @@ defmodule EasyBreezy.Examples.BreezeDeck do
             ]
           },
           transition: :slide
+        },
+        %Slide{
+          id: :counter_demo,
+          title: "Counter Demo",
+          layout: :breeze,
+          payload: %{
+            view: Counter
+          },
+          transition: :slide_up
         },
         %Slide{
           id: :performance,

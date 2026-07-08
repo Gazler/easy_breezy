@@ -4,6 +4,12 @@ defmodule EasyBreezy.DeckMarkdownTest do
   alias EasyBreezy.Deck.Markdown
   alias EasyBreezy.{Deck, Slide}
 
+  defmodule CounterView do
+    use Breeze.View
+
+    def render(assigns), do: ~H"<box>Counter</box>"
+  end
+
   test "parses deck and slide frontmatter into structs" do
     assert %Deck{
              title: "Breeze",
@@ -229,6 +235,33 @@ defmodule EasyBreezy.DeckMarkdownTest do
              )
 
     assert right_path == "/tmp/deck/image.png"
+  end
+
+  test "parses breeze slides with view modules" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 title: "Counter Demo",
+                 layout: :breeze,
+                 payload: %{
+                   title: "Counter Demo",
+                   view: CounterView,
+                   start_opts: [],
+                   assigns: %{},
+                   breeze_class: "width-full height-full"
+                 },
+                 disable_transitions?: true
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: breeze
+             title: Counter Demo
+             view: EasyBreezy.DeckMarkdownTest.CounterView
+             disable-transitions: true
+             ---
+             """)
   end
 
   test "allows punctuation in values and hyphenated keys" do

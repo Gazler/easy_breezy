@@ -101,8 +101,6 @@ defmodule EasyBreezy.PresenterSync do
     end
   end
 
-  defp default_presentation_node(_current_node), do: nil
-
   defp ensure_registry_started do
     case Process.whereis(:pg) do
       nil ->

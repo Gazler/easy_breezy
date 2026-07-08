@@ -4,6 +4,7 @@ defmodule EasyBreezy.Layouts do
   use Breeze.View
 
   import EasyBreezy.Layouts.BulletsSlide
+  import EasyBreezy.Layouts.BreezeSlide
   import EasyBreezy.Layouts.CodeSlide
   import EasyBreezy.Layouts.MarkdownSlide
   import EasyBreezy.Layouts.PresenterSlide
@@ -50,6 +51,13 @@ defmodule EasyBreezy.Layouts do
               code_source: nil,
               code_path: nil,
               code_focus_ranges: [],
+              view: nil,
+              live_id: nil,
+              start_opts: [],
+              assigns: %{},
+              breeze_class: "width-full height-full",
+              breeze_style: nil,
+              breeze_focusable: true,
               markdown: nil,
               markdown_blocks: nil
             },
@@ -126,11 +134,26 @@ defmodule EasyBreezy.Layouts do
       body_height={@body_height}
       render_context={@render_context}
     />
+    <.breeze_slide
+      :if={@slide.layout == :breeze}
+      slide_id={@slide.id}
+      view={@slide_payload.view}
+      live_id={@slide_payload[:live_id]}
+      start_opts={@slide_payload[:start_opts] || []}
+      assigns={@slide_payload[:assigns] || %{}}
+      class={@slide_payload[:breeze_class] || @slide_payload[:class] || "width-full height-full"}
+      style={@slide_payload[:breeze_style] || @slide_payload[:style]}
+      focusable={@slide_payload[:breeze_focusable] != false}
+    />
     """
   end
 
   defp resolve_slide_payload(%{payload: payload}, body_width, step) when is_function(payload, 2),
     do: payload.(body_width, step)
+
+  defp resolve_slide_payload(%{layout: :breeze, payload: view}, _body_width, _step)
+       when is_atom(view),
+       do: %{view: view}
 
   defp resolve_slide_payload(%{payload: payload}, _body_width, _step) when is_map(payload),
     do: payload

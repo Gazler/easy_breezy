@@ -63,3 +63,10 @@ path: counter.ex
 focus: [10..19, 21..27]
 steps: 2
 ---
+---
+id: counter_demo
+layout: breeze
+title: Counter Demo
+view: Counter
+disable-transitions: true
+---
