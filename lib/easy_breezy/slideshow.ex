@@ -2,6 +2,7 @@ defmodule EasyBreezy.Slideshow do
   use Breeze.View
 
   alias EasyBreezy.Layouts.CodeSlide
+  import Breeze.Blocks
   import EasyBreezy.Layouts
   import EasyBreezy.Transitions
   alias Breeze.Theme
@@ -32,7 +33,10 @@ defmodule EasyBreezy.Slideshow do
         presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
         presenter_subscribers: MapSet.new(),
         themes: Keyword.get(opts, :themes, @themes),
-        started_at_ms: System.monotonic_time(:millisecond)
+        started_at_ms: System.monotonic_time(:millisecond),
+        goto_modal?: false,
+        goto_slide_input: "",
+        goto_slide_error: nil
       )
       |> assign_theme_context()
       |> maybe_register_presentation()
@@ -99,6 +103,7 @@ defmodule EasyBreezy.Slideshow do
           <box> ←/h prev </box>
           <box> →/l next </box>
           <box> space advance </box>
+          <box> g go to </box>
           <box class="text-muted"> ^t theme </box>
           <box style="width-full text-right"> q quit </box>
         </box>
@@ -114,8 +119,58 @@ defmodule EasyBreezy.Slideshow do
           </live>
         </box>
       </box>
+      <.modal
+        :if={@goto_modal?}
+        id="goto-slide-modal"
+        width={36}
+        height={8}
+        dim
+        br-change="close_goto_slide"
+      >
+        <:title>Go To Slide</:title>
+        <box class="absolute left-2 top-2 text-muted">Slide 1-{@total_slides}</box>
+        <.input
+          id="goto-slide-input"
+          input-value={@goto_slide_input}
+          input-placeholder="Enter slide"
+          br-change="goto_slide_changed"
+          default-focus
+          class="absolute left-2 top-3 width-32"
+        >
+          {@goto_slide_input}
+        </.input>
+        <box :if={@goto_slide_error} class="absolute left-2 top-5 text-error">
+          {@goto_slide_error}
+        </box>
+      </.modal>
     </box>
     """
+  end
+
+  def handle_event("close_goto_slide", _event, term) do
+    {:noreply, close_goto_slide(term)}
+  end
+
+  def handle_event("goto_slide_changed", %{value: value}, term) do
+    {:noreply, assign(term, goto_slide_input: slide_number_input(value), goto_slide_error: nil)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{goto_modal?: true}} = term)
+      when key in ["Enter", "\r"] do
+    {:noreply, submit_goto_slide(term)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{goto_modal?: true}} = term)
+      when key in ["Escape", "Esc", "\e"] do
+    {:noreply, close_goto_slide(term)}
+  end
+
+  def handle_event(_, %{"key" => _key}, %{assigns: %{goto_modal?: true}} = term) do
+    {:noreply, term}
+  end
+
+  def handle_event(_, %{"key" => "g"}, term) do
+    {:noreply, open_goto_slide(term)}
   end
 
   def handle_event(_, %{"key" => key}, term) when key in [" ", "ArrowRight", "l", "PageDown"] do
@@ -129,8 +184,7 @@ defmodule EasyBreezy.Slideshow do
   def handle_event(_, %{"key" => "Home"}, term) do
     {:noreply,
      term
-     |> assign(slide_index: 0, step: 0)
-     |> clamp_position()
+     |> jump_to_position(0, 0)
      |> maybe_publish_presentation_soon()}
   end
 
@@ -140,8 +194,7 @@ defmodule EasyBreezy.Slideshow do
 
     {:noreply,
      term
-     |> assign(slide_index: last_index, step: last_slide.steps)
-     |> clamp_position()
+     |> jump_to_position(last_index, last_slide.steps)
      |> maybe_publish_presentation_soon()}
   end
 
@@ -229,6 +282,51 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_info(_, term), do: {:noreply, term}
+
+  defp open_goto_slide(term) do
+    term
+    |> assign(goto_modal?: true, goto_slide_input: "", goto_slide_error: nil)
+    |> Breeze.View.focus("goto-slide-input")
+  end
+
+  defp close_goto_slide(term) do
+    assign(term, goto_modal?: false, goto_slide_input: "", goto_slide_error: nil)
+  end
+
+  defp submit_goto_slide(term) do
+    total_slides = length(term.assigns.deck.slides)
+
+    case parse_goto_slide(term.assigns.goto_slide_input, total_slides) do
+      {:ok, slide_index} ->
+        term
+        |> assign(
+          goto_modal?: false,
+          goto_slide_input: "",
+          goto_slide_error: nil
+        )
+        |> jump_to_slide(slide_index)
+        |> maybe_publish_presentation_soon()
+
+      {:error, message} ->
+        term
+        |> assign(goto_slide_error: message)
+        |> Breeze.View.focus("goto-slide-input")
+    end
+  end
+
+  defp parse_goto_slide(input, total_slides) do
+    case Integer.parse(String.trim(input)) do
+      {slide_number, ""} when slide_number >= 1 and slide_number <= total_slides ->
+        {:ok, slide_number - 1}
+
+      _other ->
+        {:error, "Enter 1-#{total_slides}"}
+    end
+  end
+
+  defp slide_number_input(value) do
+    String.replace(value || "", ~r/\D/, "")
+  end
 
   defp advance(term) do
     if term.assigns.transition do
@@ -359,8 +457,7 @@ defmodule EasyBreezy.Slideshow do
 
   defp handle_presenter_command(:home, term) do
     term
-    |> assign(slide_index: 0, step: 0)
-    |> clamp_position()
+    |> jump_to_position(0, 0)
     |> maybe_publish_presentation_soon()
   end
 
@@ -369,8 +466,7 @@ defmodule EasyBreezy.Slideshow do
     last_slide = Enum.at(term.assigns.deck.slides, last_index)
 
     term
-    |> assign(slide_index: last_index, step: last_slide.steps)
-    |> clamp_position()
+    |> jump_to_position(last_index, last_slide.steps)
     |> maybe_publish_presentation_soon()
   end
 
@@ -416,16 +512,56 @@ defmodule EasyBreezy.Slideshow do
     end
   end
 
-  defp clamp_position(term) do
-    deck = term.assigns.deck
+  defp jump_to_slide(term, slide_index) do
+    slide_index = clamp_slide_index(term.assigns.deck, slide_index)
+
+    if slide_index == term.assigns.slide_index do
+      term
+    else
+      jump_to_position(term, slide_index, 0)
+    end
+  end
+
+  defp jump_to_position(term, slide_index, step) do
+    {slide_index, step} = clamped_position(term.assigns.deck, slide_index, step)
+
+    if slide_index == term.assigns.slide_index and step == term.assigns.step do
+      term
+    else
+      do_jump_to_position(term, slide_index, step)
+    end
+  end
+
+  defp do_jump_to_position(term, slide_index, step) do
     previous_slide = current_slide(term.assigns)
-    slide_index = term.assigns.slide_index |> max(0) |> min(length(deck.slides) - 1)
-    slide = Enum.at(deck.slides, slide_index)
-    step = term.assigns.step |> max(0) |> min(slide.steps)
+
+    term
+    |> assign(slide_index: slide_index, step: step)
+    |> assign(transition: nil)
+    |> maybe_delete_image_overlay(previous_slide)
+  end
+
+  defp clamp_position(term), do: clamp_position(term, current_slide(term.assigns))
+
+  defp clamp_position(term, previous_slide) do
+    deck = term.assigns.deck
+    {slide_index, step} = clamped_position(deck, term.assigns.slide_index, term.assigns.step)
 
     term
     |> assign(slide_index: slide_index, step: step, transition: nil)
     |> maybe_delete_image_overlay(previous_slide)
+  end
+
+  defp clamped_position(deck, slide_index, step) do
+    slide_index = clamp_slide_index(deck, slide_index)
+    slide = Enum.at(deck.slides, slide_index)
+    step = step |> max(0) |> min(slide.steps)
+
+    {slide_index, step}
+  end
+
+  defp clamp_slide_index(deck, slide_index) do
+    slide_index |> max(0) |> min(length(deck.slides) - 1)
   end
 
   defp visible_position(%{
