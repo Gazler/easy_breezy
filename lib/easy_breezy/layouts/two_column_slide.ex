@@ -19,6 +19,7 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
   attr :right_mode, :atom, default: :text
   attr :right_path, :string, default: nil
   attr :right_mermaid_source, :string, default: nil
+  attr :reveal, :any, default: :step
   attr :step, :integer, required: true
   attr :body_width, :integer, required: true
   attr :body_height, :integer, required: true
@@ -36,15 +37,20 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
     right_mermaid_source = Map.get(assigns, :right_mermaid_source)
     right_path = Map.get(assigns, :right_path)
     right_title = Map.get(assigns, :right_title)
-
-    visible_items =
-      Enum.take(left_items, min(assigns.step + 1, length(left_items)))
+    reveal = Map.get(assigns, :reveal, :step)
+    immediate? = immediate_reveal?(reveal)
+    visible_items = visible_items(left_items, assigns.step, immediate?)
 
     left_width = max(div(assigns.body_width, 2) - 4, 16)
     right_width = max(div(assigns.body_width, 2) - 4, 16)
     panel_height = max(assigns.body_height, 4)
     code_lines = max(panel_height - 4, 1)
-    left_item_lines = Enum.map(visible_items, &bullet_line(&1, left_width))
+
+    left_item_lines =
+      Enum.map(
+        visible_items,
+        &bullet_line(&1, left_width, assigns.render_context, background: :panel)
+      )
 
     left_lines =
       case left_lines do
@@ -61,7 +67,7 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
 
     show_right_lines? =
       right_mode == :text and
-        (right_notice == nil or assigns.step >= length(left_items))
+        (right_notice == nil or immediate? or assigns.step >= length(left_items))
 
     image_mode? = left_mode == :image or right_mode == :image
     left_header_height = if(left_title, do: 2, else: 0)
@@ -75,6 +81,7 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
       assigns
       |> assign(
         left_items: left_items,
+        reveal: reveal,
         left_mermaid_source: left_mermaid_source,
         left_mode: left_mode,
         left_path: left_path,
@@ -182,4 +189,13 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
 
   defp normalize_line({class, line}), do: {class, line}
   defp normalize_line(line), do: {"", line}
+
+  defp visible_items(items, _step, true), do: items
+
+  defp visible_items(items, step, false) do
+    Enum.take(items, min(step + 1, length(items)))
+  end
+
+  defp immediate_reveal?(value) when value in [:immediate, "immediate"], do: true
+  defp immediate_reveal?(_value), do: false
 end

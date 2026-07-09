@@ -5,6 +5,7 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
 
   alias EasyBreezy.Components.Mermaid
   alias EasyBreezy.Deck.Markdown
+  alias EasyBreezy.Markdown, as: MarkdownRenderer
 
   import Breeze.Blocks
   import EasyBreezy.Layouts.Helpers
@@ -12,16 +13,20 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
   attr :title, :string, required: true
   attr :items, :list, required: true
   attr :after_markdown, :string, default: nil
+  attr :reveal, :any, default: :step
   attr :step, :integer, required: true
   attr :body_width, :integer, required: true
   attr :body_height, :integer, required: true
   attr :render_context, :map, default: %{}
 
   def bullets_slide(assigns) do
-    assigns = Map.merge(%{after_markdown: nil, render_context: %{}}, assigns)
-    visible_items = Enum.take(assigns.items, assigns.step + 1)
+    assigns = Map.merge(%{after_markdown: nil, render_context: %{}, reveal: :step}, assigns)
+    immediate? = immediate_reveal?(assigns.reveal)
+    visible_items = visible_items(assigns.items, assigns.step, immediate?)
     after_markdown? = markdown_present?(assigns.after_markdown)
-    show_after_markdown? = after_markdown? and assigns.step >= length(assigns.items)
+
+    show_after_markdown? =
+      after_markdown? and (immediate? or assigns.step >= length(assigns.items))
 
     notes =
       if length(visible_items) < length(assigns.items) or
@@ -31,7 +36,9 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
         ""
       end
 
-    item_lines = Enum.map(visible_items, &bullet_line(&1, assigns.body_width))
+    item_lines =
+      Enum.map(visible_items, &bullet_line(&1, assigns.body_width, assigns.render_context))
+
     rendered_after_markdown_blocks = render_after_markdown_blocks(assigns, show_after_markdown?)
 
     assigns =
@@ -63,10 +70,19 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
   defp after_markdown_block(assigns) do
     ~H"""
     <box :if={@block.type == :markdown}>{@block.rendered}</box>
+    <box :if={Map.get(@block, :blank_after?, false)}>
+    </box>
     <box :if={@block.type == :mermaid}>
       <box :for={line <- @block.lines} class={@block.class}>{line}</box>
     </box>
+    <.breeze_content :if={@block.type == :breeze} block={@block}/>
     """
+  end
+
+  attr :block, :map, required: true
+
+  defp breeze_content(assigns) do
+    {Map.fetch!(assigns.block, :template), Map.get(assigns.block, :assigns, %{})}
   end
 
   defp render_after_markdown_blocks(_assigns, false), do: []
@@ -75,21 +91,64 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
     width = assigns.body_width
     height = max(assigns.body_height, 1)
     reset = markdown_restore(assigns.render_context)
+    env = __ENV__
 
     assigns.after_markdown
     |> Markdown.content_blocks()
+    |> with_next_block()
     |> Enum.map(fn
-      %{type: :markdown, content: content} ->
-        %{type: :markdown, rendered: Breeze.Markdown.render(content, width, reset: reset)}
+      {%{type: :markdown, content: content}, next_block} ->
+        %{
+          type: :markdown,
+          rendered: MarkdownRenderer.render(content, width, reset: reset),
+          blank_after?: blank_after_markdown?(content, next_block)
+        }
 
-      %{type: :mermaid, content: source} ->
+      {%{type: :mermaid, content: source}, _next_block} ->
         {class, lines} = Mermaid.render_lines(source, width, height, assigns.render_context)
         %{type: :mermaid, class: class, lines: lines}
+
+      {%{type: :breeze, content: source}, _next_block} ->
+        %{
+          type: :breeze,
+          template: Breeze.Template.compile!(source, env),
+          assigns: breeze_assigns(assigns, width, height)
+        }
     end)
+  end
+
+  defp with_next_block([]), do: []
+  defp with_next_block([_ | rest] = blocks), do: Enum.zip(blocks, rest ++ [nil])
+
+  defp blank_after_markdown?(_content, nil), do: false
+
+  defp blank_after_markdown?(content, next_block) do
+    MarkdownRenderer.ends_with_code_fence?(content) or starts_with_code_fence?(next_block)
+  end
+
+  defp starts_with_code_fence?(%{type: :markdown, content: content}) do
+    MarkdownRenderer.starts_with_code_fence?(content)
+  end
+
+  defp starts_with_code_fence?(_block), do: false
+
+  defp breeze_assigns(assigns, width, height) do
+    assigns
+    |> Map.take([:title, :render_context])
+    |> Map.merge(%{
+      body_width: width,
+      body_height: height
+    })
   end
 
   defp markdown_present?(value) when is_binary(value), do: String.trim(value) != ""
   defp markdown_present?(_value), do: false
+
+  defp visible_items(items, _step, true), do: items
+  defp visible_items(items, step, false), do: Enum.take(items, step + 1)
+
+  defp immediate_reveal?(value) when value in [:immediate, "immediate"], do: true
+  defp immediate_reveal?(_value), do: false
 
   defp markdown_restore(%{theme_colors: %{surface: {br, bg, bb}, text: {tr, tg, tb}}}) do
     "\e[48;2;#{br};#{bg};#{bb};38;2;#{tr};#{tg};#{tb}m"

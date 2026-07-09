@@ -3,18 +3,33 @@ defmodule EasyBreezy.Layouts.PresenterSlide do
 
   use Breeze.View
 
+  import EasyBreezy.Layouts.Helpers
+
   attr :title, :string, required: true
   attr :items, :list, required: true
   attr :notes, :list, required: true
+  attr :reveal, :any, default: :step
   attr :step, :integer, required: true
   attr :body_height, :integer, required: true
   attr :render_context, :map, default: %{}
 
   def presenter_slide(assigns) do
-    visible_items = Enum.take(assigns.items, assigns.step + 1)
-    visible_notes = Enum.take(assigns.notes, assigns.step + 1)
-    item_lines = Enum.map(visible_items, &("• " <> to_string(&1)))
-    note_lines = Enum.map(visible_notes, &("• " <> to_string(&1)))
+    immediate? = immediate_reveal?(Map.get(assigns, :reveal, :step))
+    visible_items = visible_entries(assigns.items, assigns.step, immediate?)
+    visible_notes = visible_entries(assigns.notes, assigns.step, immediate?)
+
+    item_lines =
+      Enum.map(
+        visible_items,
+        &bullet_line(&1, 10_000, assigns.render_context, background: :panel)
+      )
+
+    note_lines =
+      Enum.map(
+        visible_notes,
+        &bullet_line(&1, 10_000, assigns.render_context, background: :panel, foreground: :muted)
+      )
+
     panel_height = max(assigns.body_height, 4)
 
     assigns =
@@ -46,4 +61,10 @@ defmodule EasyBreezy.Layouts.PresenterSlide do
     </box>
     """
   end
+
+  defp visible_entries(entries, _step, true), do: entries
+  defp visible_entries(entries, step, false), do: Enum.take(entries, step + 1)
+
+  defp immediate_reveal?(value) when value in [:immediate, "immediate"], do: true
+  defp immediate_reveal?(_value), do: false
 end

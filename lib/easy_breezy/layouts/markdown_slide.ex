@@ -5,6 +5,7 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
 
   alias EasyBreezy.Components.Mermaid
   alias EasyBreezy.Deck.Markdown
+  alias EasyBreezy.Markdown, as: MarkdownRenderer
 
   import Breeze.Blocks
 
@@ -12,12 +13,13 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
   attr :title, :string, default: nil
   attr :content, :string, required: true
   attr :blocks, :list, default: nil
+  attr :step, :integer, default: 0
   attr :body_width, :integer, required: true
   attr :body_height, :integer, required: true
   attr :render_context, :map, default: %{}
 
   def markdown_slide(assigns) do
-    title_height = if assigns.title, do: 1, else: 0
+    title_height = if assigns.title, do: 2, else: 0
     markdown_height = max(assigns.body_height + 2 - title_height, 1)
     markdown_width = assigns.body_width + 4
 
@@ -36,6 +38,7 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
           render_blocks(
             assigns.blocks || Markdown.content_blocks(assigns.content),
             assigns,
+            assigns.step,
             markdown_width,
             markdown_height
           )
@@ -44,6 +47,8 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
     ~H"""
     <box class="width-full height-full">
       <box :if={@title} class="bold text-primary">{@title}</box>
+      <box :if={@title}>
+      </box>
       <.scroll
         id={@markdown_id}
         class="height-full overflow-scroll scrollbar-arrows"
@@ -60,25 +65,39 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
   defp markdown_content_block(assigns) do
     ~H"""
     <box :if={@block.type == :markdown}>{@block.rendered}</box>
+    <box :if={Map.get(@block, :blank_after?, false)}>
+    </box>
     <box :if={@block.type == :mermaid}>
       <box :for={line <- @block.lines} class={@block.class}>{line}</box>
       <box>
       </box>
     </box>
+    <.breeze_content :if={@block.type == :breeze} block={@block}/>
     """
   end
 
-  defp render_blocks(blocks, assigns, markdown_width, markdown_height) do
-    reset = markdown_restore(assigns.render_context)
+  attr :block, :map, required: true
 
-    Enum.map(blocks, fn
-      %{type: :markdown, content: content} ->
+  defp breeze_content(assigns) do
+    {Map.fetch!(assigns.block, :template), Map.get(assigns.block, :assigns, %{})}
+  end
+
+  defp render_blocks(blocks, assigns, step, markdown_width, markdown_height) do
+    reset = markdown_restore(assigns.render_context)
+    env = __ENV__
+
+    blocks
+    |> visible_blocks(step)
+    |> with_next_block()
+    |> Enum.map(fn
+      {%{type: :markdown, content: content}, next_block} ->
         %{
           type: :markdown,
-          rendered: Breeze.Markdown.render(content, markdown_width, reset: reset)
+          rendered: MarkdownRenderer.render(content, markdown_width, reset: reset),
+          blank_after?: blank_after_markdown?(content, next_block)
         }
 
-      %{type: :mermaid, content: source} ->
+      {%{type: :mermaid, content: source}, _next_block} ->
         {class, lines} =
           Mermaid.render_lines(
             source,
@@ -88,7 +107,44 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
           )
 
         %{type: :mermaid, class: class, lines: lines}
+
+      {%{type: :breeze, content: source}, _next_block} ->
+        %{
+          type: :breeze,
+          template: Breeze.Template.compile!(source, env),
+          assigns: breeze_assigns(assigns, markdown_width, markdown_height)
+        }
     end)
+  end
+
+  defp with_next_block([]), do: []
+  defp with_next_block([_ | rest] = blocks), do: Enum.zip(blocks, rest ++ [nil])
+
+  defp blank_after_markdown?(_content, nil), do: false
+
+  defp blank_after_markdown?(content, next_block) do
+    MarkdownRenderer.ends_with_code_fence?(content) or starts_with_code_fence?(next_block)
+  end
+
+  defp starts_with_code_fence?(%{type: :markdown, content: content}) do
+    MarkdownRenderer.starts_with_code_fence?(content)
+  end
+
+  defp starts_with_code_fence?(_block), do: false
+
+  defp visible_blocks(blocks, step) do
+    Enum.filter(blocks, &(Map.get(&1, :step, 0) <= step))
+  end
+
+  defp breeze_assigns(assigns, markdown_width, markdown_height) do
+    assigns
+    |> Map.take([:slide_id, :title, :render_context])
+    |> Map.merge(%{
+      body_width: assigns.body_width,
+      body_height: assigns.body_height,
+      markdown_width: markdown_width,
+      markdown_height: markdown_height
+    })
   end
 
   defp markdown_restore(%{theme_colors: %{surface: {br, bg, bb}, text: {tr, tg, tb}}}) do

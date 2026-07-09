@@ -42,6 +42,7 @@ defmodule EasyBreezy.Layouts do
               footer: nil,
               title_font: nil,
               font: nil,
+              reveal: nil,
               right_title: nil,
               right_lines: [],
               right_mermaid_source: nil,
@@ -84,6 +85,7 @@ defmodule EasyBreezy.Layouts do
       title={@slide_payload.title}
       items={@slide_payload.items}
       after_markdown={@slide_payload.after_markdown}
+      reveal={reveal(@slide_payload)}
       step={@step}
       body_width={@body_width}
       body_height={@body_height}
@@ -104,6 +106,7 @@ defmodule EasyBreezy.Layouts do
       right_notice={@slide_payload[:right_notice]}
       right_mode={@slide_payload[:right_mode] || :text}
       right_path={@slide_payload[:right_path]}
+      reveal={reveal(@slide_payload)}
       step={@step}
       body_width={@body_width}
       body_height={@body_height}
@@ -114,6 +117,7 @@ defmodule EasyBreezy.Layouts do
       title={@slide_payload.title}
       items={@slide_payload.items}
       notes={@slide_payload.notes}
+      reveal={reveal(@slide_payload)}
       step={@step}
       body_height={@body_height}
       render_context={@render_context}
@@ -124,6 +128,7 @@ defmodule EasyBreezy.Layouts do
       title={@slide_payload.title}
       content={@slide_payload.markdown}
       blocks={@slide_payload[:markdown_blocks]}
+      step={@step}
       body_width={@body_width}
       body_height={@body_height}
       render_context={@render_context}
@@ -170,4 +175,8 @@ defmodule EasyBreezy.Layouts do
   end
 
   defp resolve_code_payload(payload, _step), do: payload
+
+  defp reveal(payload) do
+    Map.get(payload, :reveal, :step)
+  end
 end
