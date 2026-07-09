@@ -53,6 +53,14 @@ defmodule EasyBreezy.Deck.Markdown.LineParser do
     |> ignore(ascii_char([?i, ?I]))
     |> ignore(ascii_char([?d, ?D]))
 
+  breeze_word =
+    ignore(ascii_char([?b, ?B]))
+    |> ignore(ascii_char([?r, ?R]))
+    |> ignore(ascii_char([?e, ?E]))
+    |> ignore(ascii_char([?e, ?E]))
+    |> ignore(ascii_char([?z, ?Z]))
+    |> ignore(ascii_char([?e, ?E]))
+
   defparsec(
     :delimiter,
     ignore(horizontal_space)
@@ -74,6 +82,15 @@ defmodule EasyBreezy.Deck.Markdown.LineParser do
   defparsec(
     :bullet_item,
     ignore(horizontal_space)
+    |> ignore(choice([string("-"), string("*"), string("+")]))
+    |> ignore(ascii_string([?\s, ?\t], min: 1))
+    |> concat(non_empty_text)
+    |> eos()
+  )
+
+  defparsec(
+    :bullet_item_with_indent,
+    horizontal_space
     |> ignore(choice([string("-"), string("*"), string("+")]))
     |> ignore(ascii_string([?\s, ?\t], min: 1))
     |> concat(non_empty_text)
@@ -115,6 +132,19 @@ defmodule EasyBreezy.Deck.Markdown.LineParser do
   )
 
   defparsec(
+    :breeze_fence_open,
+    ignore(horizontal_space)
+    |> ignore(string("```"))
+    |> ignore(horizontal_space)
+    |> concat(breeze_word)
+    |> optional(
+      ignore(ascii_string([?\s, ?\t], min: 1))
+      |> ignore(text)
+    )
+    |> eos()
+  )
+
+  defparsec(
     :fence_close,
     ignore(horizontal_space)
     |> ignore(string("```"))
@@ -125,6 +155,7 @@ defmodule EasyBreezy.Deck.Markdown.LineParser do
   def delimiter?(line), do: parsed?(delimiter(line))
   def code_fence_open?(line), do: parsed?(code_fence_open(line))
   def mermaid_fence_open?(line), do: parsed?(mermaid_fence_open(line))
+  def breeze_fence_open?(line), do: parsed?(breeze_fence_open(line))
   def fence_close?(line), do: parsed?(fence_close(line))
 
   def slot(line) do
@@ -135,9 +166,19 @@ defmodule EasyBreezy.Deck.Markdown.LineParser do
   end
 
   def bullet(line) do
-    case bullet_item(line) do
-      {:ok, [item], "", _context, _line, _offset} -> String.trim(item)
-      _ -> nil
+    case bullet_with_indent(line) do
+      %{item: item} -> item
+      nil -> nil
+    end
+  end
+
+  def bullet_with_indent(line) do
+    case bullet_item_with_indent(line) do
+      {:ok, [indent, item], "", _context, _line, _offset} ->
+        %{indent: indent_width(indent), item: String.trim(item)}
+
+      _ ->
+        nil
     end
   end
 
@@ -160,4 +201,10 @@ defmodule EasyBreezy.Deck.Markdown.LineParser do
 
   defp parsed?({:ok, [], "", _context, _line, _offset}), do: true
   defp parsed?(_result), do: false
+
+  defp indent_width(indent) do
+    indent
+    |> String.replace("\t", "  ")
+    |> String.length()
+  end
 end

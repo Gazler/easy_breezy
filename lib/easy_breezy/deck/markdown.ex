@@ -27,7 +27,7 @@ defmodule EasyBreezy.Deck.Markdown do
   def content_blocks(source) when is_binary(source) do
     source
     |> String.split(["\r\n", "\n"], trim: false)
-    |> collect_content_blocks([], [], nil)
+    |> collect_content_blocks([], [], nil, 0)
     |> Enum.reverse()
   end
 
@@ -152,7 +152,18 @@ defmodule EasyBreezy.Deck.Markdown do
   defp list?(value), do: String.starts_with?(value, "[") and String.ends_with?(value, "]")
   defp range?(value), do: String.match?(value, ~r/^\d+\.\.\d+$/)
   defp atom?(value), do: String.match?(value, ~r/^[a-z_][a-zA-Z0-9_]*$/)
-  defp atom_key?(key), do: key in [:id, :layout, :transition, :theme, :left_mode, :right_mode]
+
+  defp atom_key?(key) do
+    key in [
+      :id,
+      :layout,
+      :transition,
+      :theme,
+      :left_mode,
+      :right_mode,
+      :reveal
+    ]
+  end
 
   defp unquote_string(value), do: value |> String.slice(1..-2//1) |> unescape_string()
   defp unescape_string(value), do: String.replace(value, ~S(\"), ~S("))
@@ -220,10 +231,15 @@ defmodule EasyBreezy.Deck.Markdown do
   end
 
   defp disable_transitions?(meta, payload) do
-    Map.get(
-      meta,
-      :disable_transitions?,
-      Map.get(meta, :disable_transitions, image_payload?(payload))
+    Enum.reduce_while(
+      [:disable_transitions?, :disable_transitions, :hide_transition, :hide_transitions],
+      image_payload?(payload),
+      fn key, default ->
+        case Map.fetch(meta, key) do
+          {:ok, value} -> {:halt, value}
+          :error -> {:cont, default}
+        end
+      end
     )
   end
 
@@ -280,6 +296,7 @@ defmodule EasyBreezy.Deck.Markdown do
     meta
     |> Map.take([:title, :notes])
     |> Map.put(:items, Map.get(meta, :items) || bullet_items(body))
+    |> maybe_put(:reveal, Map.get(meta, :reveal))
     |> maybe_put(:after_markdown, after_markdown)
     |> Map.put_new(:notes, notes_from_body(body))
   end
@@ -316,7 +333,8 @@ defmodule EasyBreezy.Deck.Markdown do
       breeze_class:
         Map.get(meta, :breeze_class) || Map.get(meta, :class) || "width-full height-full",
       breeze_style: Map.get(meta, :breeze_style) || Map.get(meta, :style),
-      breeze_focusable: Map.get(meta, :breeze_focusable, Map.get(meta, :focusable, true))
+      breeze_focusable: Map.get(meta, :breeze_focusable, Map.get(meta, :focusable, true)),
+      sync_live_state: Map.get(meta, :sync_live_state, true)
     }
   end
 
@@ -344,6 +362,7 @@ defmodule EasyBreezy.Deck.Markdown do
       left_title: Map.get(meta, :left_title) || left_title,
       left_items: left_items,
       left_lines: left_lines(left_text, left_items),
+      reveal: Map.get(meta, :reveal),
       left_mode: left_mode,
       left_path: resolve_image_path(left_path, left_mode, base_path),
       right_title: Map.get(meta, :right_title) || right_title,
@@ -355,7 +374,7 @@ defmodule EasyBreezy.Deck.Markdown do
   end
 
   defp payload_for(:markdown, meta, body, _base_path) do
-    markdown = strip_notes(body)
+    markdown = strip_notes(body, preserve_step_markers?: true)
 
     %{
       title: Map.get(meta, :title),
@@ -509,57 +528,127 @@ defmodule EasyBreezy.Deck.Markdown do
     |> markdown_text_lines()
   end
 
-  defp collect_content_blocks([], markdown_lines, blocks, nil) do
-    append_markdown_block(markdown_lines, blocks)
+  defp collect_content_blocks([], markdown_lines, blocks, nil, step) do
+    append_markdown_block(markdown_lines, blocks, step)
   end
 
-  defp collect_content_blocks([], _markdown_lines, blocks, {:mermaid, mermaid_lines}) do
-    append_mermaid_block(mermaid_lines, blocks)
+  defp collect_content_blocks([], _markdown_lines, blocks, {:mermaid, mermaid_lines}, step) do
+    append_mermaid_block(mermaid_lines, blocks, step)
   end
 
-  defp collect_content_blocks([line | rest], markdown_lines, blocks, nil) do
-    if mermaid_fence_open?(line) do
+  defp collect_content_blocks([], _markdown_lines, blocks, {:breeze, breeze_lines}, step) do
+    append_breeze_block(breeze_lines, blocks, step)
+  end
+
+  defp collect_content_blocks([line | rest], markdown_lines, blocks, nil, step) do
+    cond do
+      step_marker_line?(line) ->
+        collect_content_blocks(
+          rest,
+          [],
+          append_markdown_block(markdown_lines, blocks, step),
+          nil,
+          step + 1
+        )
+
+      mermaid_fence_open?(line) ->
+        collect_content_blocks(
+          rest,
+          [],
+          append_markdown_block(markdown_lines, blocks, step),
+          {:mermaid, []},
+          step
+        )
+
+      breeze_fence_open?(line) ->
+        collect_content_blocks(
+          rest,
+          [],
+          append_markdown_block(markdown_lines, blocks, step),
+          {:breeze, []},
+          step
+        )
+
+      true ->
+        collect_content_blocks(rest, [line | markdown_lines], blocks, nil, step)
+    end
+  end
+
+  defp collect_content_blocks(
+         [line | rest],
+         _markdown_lines,
+         blocks,
+         {:mermaid, mermaid_lines},
+         step
+       ) do
+    if fence_close?(line) do
       collect_content_blocks(
         rest,
         [],
-        append_markdown_block(markdown_lines, blocks),
-        {:mermaid, []}
+        append_mermaid_block(mermaid_lines, blocks, step),
+        nil,
+        step
       )
     else
-      collect_content_blocks(rest, [line | markdown_lines], blocks, nil)
+      collect_content_blocks(rest, [], blocks, {:mermaid, [line | mermaid_lines]}, step)
     end
   end
 
-  defp collect_content_blocks([line | rest], _markdown_lines, blocks, {:mermaid, mermaid_lines}) do
+  defp collect_content_blocks(
+         [line | rest],
+         _markdown_lines,
+         blocks,
+         {:breeze, breeze_lines},
+         step
+       ) do
     if fence_close?(line) do
-      collect_content_blocks(rest, [], append_mermaid_block(mermaid_lines, blocks), nil)
+      collect_content_blocks(rest, [], append_breeze_block(breeze_lines, blocks, step), nil, step)
     else
-      collect_content_blocks(rest, [], blocks, {:mermaid, [line | mermaid_lines]})
+      collect_content_blocks(rest, [], blocks, {:breeze, [line | breeze_lines]}, step)
     end
   end
 
-  defp append_markdown_block(lines, blocks) do
+  defp append_markdown_block(lines, blocks, step) do
     lines
     |> Enum.reverse()
     |> Enum.join("\n")
     |> String.trim()
     |> then(fn
       "" -> blocks
-      content -> [%{type: :markdown, content: content} | blocks]
+      content -> [%{type: :markdown, content: content, step: step} | blocks]
     end)
   end
 
-  defp append_mermaid_block(lines, blocks) do
+  defp append_mermaid_block(lines, blocks, step) do
     content =
       lines
       |> Enum.reverse()
       |> Enum.join("\n")
       |> String.trim()
 
-    [%{type: :mermaid, content: content} | blocks]
+    [%{type: :mermaid, content: content, step: step} | blocks]
+  end
+
+  defp append_breeze_block(lines, blocks, step) do
+    content =
+      lines
+      |> Enum.reverse()
+      |> Enum.join("\n")
+      |> String.trim()
+
+    [%{type: :breeze, content: content, step: step} | blocks]
+  end
+
+  defp step_marker_line?(line), do: line |> String.trim() |> step_marker_comment?()
+
+  defp step_marker_count(source) do
+    source
+    |> String.split(["\r\n", "\n"], trim: false)
+    |> Enum.count(&step_marker_line?/1)
   end
 
   defp mermaid_fence_open?(line), do: LineParser.mermaid_fence_open?(line)
+  defp breeze_fence_open?(line), do: LineParser.breeze_fence_open?(line)
   defp fence_close?(line), do: LineParser.fence_close?(line)
 
   defp markdown_text_lines(body) do
@@ -573,6 +662,7 @@ defmodule EasyBreezy.Deck.Markdown do
     after_markdown = Map.get(meta, :after_markdown) || after_bullets_markdown(body)
 
     cond do
+      immediate_reveal?(Map.get(meta, :reveal)) -> 0
       markdown_present?(after_markdown) and items != [] -> length(items)
       true -> max(length(items) - 1, 0)
     end
@@ -591,26 +681,61 @@ defmodule EasyBreezy.Deck.Markdown do
     {_left_title, left_body} = slot_title(left)
     item_count = length(Map.get(meta, :left_items) || bullet_items(left_body))
 
-    if Map.get(meta, :right_notice) && item_count > 0 do
-      item_count
-    else
-      max(item_count - 1, 0)
+    cond do
+      immediate_reveal?(Map.get(meta, :reveal)) -> 0
+      Map.get(meta, :right_notice) && item_count > 0 -> item_count
+      true -> max(item_count - 1, 0)
     end
   end
 
+  defp default_steps(:markdown, _meta, body) do
+    body
+    |> strip_notes(preserve_step_markers?: true)
+    |> step_marker_count()
+  end
+
   defp default_steps(_layout, _meta, _body), do: 0
+
+  defp immediate_reveal?(value), do: value in [:immediate, "immediate"]
 
   defp bullet_items(body) do
     body
     |> strip_notes()
     |> String.split("\n")
-    |> Enum.flat_map(fn line ->
-      case LineParser.bullet(line) do
-        nil -> []
-        item -> [item]
-      end
-    end)
+    |> nested_bullet_items()
   end
+
+  defp nested_bullet_items(lines) do
+    {items, current, _base_indent} =
+      Enum.reduce(lines, {[], nil, nil}, fn line, {items, current, base_indent} ->
+        case LineParser.bullet_with_indent(line) do
+          nil ->
+            {items, current, base_indent}
+
+          %{indent: indent, item: item} ->
+            append_bullet_item(items, current, base_indent, indent, item)
+        end
+      end)
+
+    items
+    |> append_current_bullet(current)
+    |> Enum.reverse()
+  end
+
+  defp append_bullet_item(items, nil, _base_indent, indent, item), do: {items, item, indent}
+
+  defp append_bullet_item(items, current, base_indent, indent, item)
+       when indent <= base_indent do
+    {append_current_bullet(items, current), item, indent}
+  end
+
+  defp append_bullet_item(items, current, base_indent, indent, item) do
+    nested_indent = String.duplicate(" ", indent - base_indent)
+    {items, current <> "\n" <> nested_indent <> "- " <> item, base_indent}
+  end
+
+  defp append_current_bullet(items, nil), do: items
+  defp append_current_bullet(items, current), do: [current | items]
 
   defp after_bullets_markdown(body) do
     body
@@ -658,6 +783,7 @@ defmodule EasyBreezy.Deck.Markdown do
     body
     |> then(&Regex.scan(~r/<!--(.*?)-->/s, &1, capture: :all_but_first))
     |> Enum.map(fn [note] -> String.trim(note) end)
+    |> Enum.reject(&step_marker_comment?/1)
     |> Enum.reject(&(&1 == ""))
     |> case do
       [] -> nil
@@ -666,5 +792,21 @@ defmodule EasyBreezy.Deck.Markdown do
     end
   end
 
-  defp strip_notes(body), do: Regex.replace(~r/<!--.*?-->/s, body, "") |> String.trim()
+  defp strip_notes(body, opts \\ []) do
+    preserve_step_markers? = Keyword.get(opts, :preserve_step_markers?, false)
+
+    Regex.replace(~r/<!--.*?-->/s, body, fn comment ->
+      if preserve_step_markers? and step_marker_comment?(comment) do
+        comment
+      else
+        ""
+      end
+    end)
+    |> String.trim()
+  end
+
+  defp step_marker_comment?(comment) when is_binary(comment) do
+    String.match?(String.trim(comment), ~r/^<!--\s*step\s*-->$/i) or
+      String.match?(String.trim(comment), ~r/^step$/i)
+  end
 end

@@ -165,6 +165,60 @@ defmodule EasyBreezy.DeckMarkdownTest do
              """)
   end
 
+  test "parses immediate reveal for bullet slides" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :bullets,
+                 payload: %{
+                   items: ["One", "Two"],
+                   reveal: :immediate,
+                   after_markdown: "Final **note**."
+                 },
+                 steps: 0
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: bullets
+             title: Why
+             reveal: immediate
+             ---
+             - One
+             - Two
+
+             Final **note**.
+             """)
+  end
+
+  test "groups nested bullets under their top-level bullet" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :bullets,
+                 payload: %{
+                   items: [
+                     "One\n  - One A\n  - `One B`",
+                     "Two"
+                   ]
+                 },
+                 steps: 1
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: bullets
+             title: Why
+             ---
+             - One
+               - One A
+               - `One B`
+             - Two
+             """)
+  end
+
   test "parses mermaid fences inside markdown slides" do
     assert %Deck{
              slides: [
@@ -194,6 +248,64 @@ defmodule EasyBreezy.DeckMarkdownTest do
              ```
 
              After
+             """)
+  end
+
+  test "parses breeze fences inside markdown slides" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :markdown,
+                 payload: %{
+                   markdown_blocks: [
+                     %{type: :markdown, content: "# Custom\n\nBefore"},
+                     %{
+                       type: :breeze,
+                       content: ~s(<box style="text-3 bg-5 bold">Hello World</box>)
+                     },
+                     %{type: :markdown, content: "After"}
+                   ]
+                 }
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             # Custom
+
+             Before
+
+             ```breeze
+             <box style="text-3 bg-5 bold">Hello World</box>
+             ```
+
+             After
+             """)
+  end
+
+  test "parses markdown step markers as progressive content steps" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :markdown,
+                 steps: 1,
+                 payload: %{
+                   notes: nil,
+                   markdown_blocks: [
+                     %{type: :markdown, content: "Before", step: 0},
+                     %{type: :breeze, content: ~s(<box>Hello World</box>), step: 1}
+                   ]
+                 }
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             Before
+
+             <!-- step -->
+
+             ```breeze
+             <box>Hello World</box>
+             ```
              """)
   end
 
@@ -235,6 +347,66 @@ defmodule EasyBreezy.DeckMarkdownTest do
              )
 
     assert right_path == "/tmp/deck/image.png"
+  end
+
+  test "parses immediate reveal for split slides" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :two_column,
+                 payload: %{
+                   left_items: ["One", "Two"],
+                   reveal: :immediate,
+                   right_notice: "Advance"
+                 },
+                 steps: 0
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: two-cols
+             title: Split
+             reveal: immediate
+             right_notice: Advance
+             ---
+             # Left
+
+             - One
+             - Two
+
+             ::right::
+
+             Notes
+             """)
+  end
+
+  test "groups nested split bullets under their top-level bullet" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :two_column,
+                 payload: %{
+                   left_items: [
+                     "One\n  - One A",
+                     "Two"
+                   ]
+                 },
+                 steps: 1
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: two-cols
+             title: Split
+             ---
+             # Left
+
+             - One
+               - One A
+             - Two
+             """)
   end
 
   test "resolves two-column metadata image paths against the deck directory" do
@@ -308,6 +480,46 @@ defmodule EasyBreezy.DeckMarkdownTest do
              disable-transitions: true
              ---
              Body
+             """)
+  end
+
+  test "accepts hide_transition as a disable transitions alias" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 title: "Snake Demo",
+                 disable_transitions?: true
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: breeze
+             title: Snake Demo
+             view: EasyBreezy.DeckMarkdownTest.CounterView
+             hide_transition: true
+             ---
+             """)
+  end
+
+  test "parses sync_live_state for breeze slides" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :breeze,
+                 payload: %{
+                   sync_live_state: false
+                 }
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: breeze
+             title: Snake Demo
+             view: EasyBreezy.DeckMarkdownTest.CounterView
+             sync_live_state: false
+             ---
              """)
   end
 end
