@@ -25,6 +25,8 @@ defmodule EasyBreezy.Implicit.TitleGradient do
 
   def handle_modifiers(_type, _flags, _state), do: []
 
+  def handle_event(_, _, state), do: {:noreply, state}
+
   def colors(theme_colors, frame) when is_map(theme_colors) and is_integer(frame) do
     primary = Map.get(theme_colors, :primary)
     secondary = Map.get(theme_colors, :secondary)

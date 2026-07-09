@@ -26,6 +26,8 @@ defmodule EasyBreezy.Implicit.TextShimmer do
 
   def handle_modifiers(_type, _flags, _state), do: []
 
+  def handle_event(_, _, state), do: {:noreply, state}
+
   def animate(:root, box, _flags, state, %{layout: %Breeze.Viewport{} = layout} = ctx) do
     content = shimmer_content(box, state, shimmer_frame(state, ctx))
 
