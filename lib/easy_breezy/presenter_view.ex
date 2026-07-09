@@ -143,6 +143,7 @@ defmodule EasyBreezy.PresenterView do
             />
           </box>
           <box style={@gutter_style}>
+            {" "}
           </box>
           <box style={@next_style} class="border border-stroke bg-panel">
             <box :if={!is_nil(@next_slide)} style={@next_body_style} class="overflow-hidden">

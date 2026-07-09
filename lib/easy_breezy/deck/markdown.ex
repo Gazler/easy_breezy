@@ -270,14 +270,17 @@ defmodule EasyBreezy.Deck.Markdown do
 
   defp payload_for(:title, meta, body, _base_path) do
     meta
-    |> Map.take([:title, :subtitle, :speaker, :footer, :notes])
+    |> Map.take([:title, :prefix, :subtitle, :speaker, :footer, :notes])
     |> Map.put_new(:notes, notes_from_body(body))
   end
 
   defp payload_for(:bullets, meta, body, _base_path) do
+    after_markdown = Map.get(meta, :after_markdown) || after_bullets_markdown(body)
+
     meta
     |> Map.take([:title, :notes])
     |> Map.put(:items, Map.get(meta, :items) || bullet_items(body))
+    |> maybe_put(:after_markdown, after_markdown)
     |> Map.put_new(:notes, notes_from_body(body))
   end
 
@@ -566,11 +569,13 @@ defmodule EasyBreezy.Deck.Markdown do
   end
 
   defp default_steps(:bullets, meta, body) do
-    meta
-    |> Map.get(:items, bullet_items(body))
-    |> length()
-    |> Kernel.-(1)
-    |> max(0)
+    items = Map.get(meta, :items, bullet_items(body))
+    after_markdown = Map.get(meta, :after_markdown) || after_bullets_markdown(body)
+
+    cond do
+      markdown_present?(after_markdown) and items != [] -> length(items)
+      true -> max(length(items) - 1, 0)
+    end
   end
 
   defp default_steps(:code, meta, _body) do
@@ -606,6 +611,48 @@ defmodule EasyBreezy.Deck.Markdown do
       end
     end)
   end
+
+  defp after_bullets_markdown(body) do
+    body
+    |> strip_notes()
+    |> remove_leading_title()
+    |> String.split("\n", trim: false)
+    |> lines_after_last_bullet()
+    |> Enum.join("\n")
+    |> String.trim()
+    |> blank_to_nil()
+  end
+
+  defp remove_leading_title(body) do
+    case String.split(body, "\n", trim: false) do
+      ["# " <> _title | rest] -> rest |> Enum.join("\n") |> String.trim_leading("\n")
+      _lines -> body
+    end
+  end
+
+  defp lines_after_last_bullet(lines) do
+    last_bullet_index =
+      lines
+      |> Enum.with_index()
+      |> Enum.reduce(nil, fn {line, index}, last_index ->
+        if LineParser.bullet(line), do: index, else: last_index
+      end)
+
+    case last_bullet_index do
+      nil -> []
+      index -> Enum.drop(lines, index + 1)
+    end
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp markdown_present?(value) when is_binary(value), do: String.trim(value) != ""
+  defp markdown_present?(_value), do: false
+
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(value), do: value
 
   defp notes_from_body(body) do
     body

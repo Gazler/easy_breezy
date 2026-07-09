@@ -3,6 +3,54 @@ defmodule EasyBreezy.Layouts.TitleSlideTest do
 
   alias EasyBreezy.{Deck, Slide}
 
+  test "title slide renders an optional prefix above the title" do
+    deck = %Deck{
+      title: "Prefix Deck",
+      slides: [
+        %Slide{
+          id: :title,
+          title: "Title",
+          layout: :title,
+          payload: %{
+            prefix: "Chapter 1",
+            title: "Easy Breezy",
+            subtitle: "Terminal slides",
+            speaker: "Gazler",
+            footer: "Built on Breeze"
+          }
+        }
+      ]
+    }
+
+    session =
+      Breeze.Test.start!(EasyBreezy.Slideshow,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, themes: [:nebula], theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    rendered =
+      session
+      |> Breeze.Test.render!()
+      |> strip_ansi()
+
+    assert rendered =~ "╚══════╝"
+    assert rendered =~ "Terminal slides"
+    assert rendered =~ "by Gazler"
+    assert rendered =~ "Built on Breeze"
+
+    lines = String.split(rendered, "\n")
+
+    prefix_line = Enum.find_index(lines, &String.contains?(&1, "Chapter 1"))
+    title_line = Enum.find_index(lines, &String.contains?(&1, "██"))
+
+    assert is_integer(prefix_line)
+    assert is_integer(title_line)
+    assert title_line > prefix_line + 1
+  end
+
   test "title slide payload can override the figlet font" do
     deck = %Deck{
       title: "Font Deck",

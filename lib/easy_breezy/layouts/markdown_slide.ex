@@ -17,7 +17,8 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
   attr :render_context, :map, default: %{}
 
   def markdown_slide(assigns) do
-    markdown_height = max(assigns.body_height - 2, 1)
+    title_height = if assigns.title, do: 1, else: 0
+    markdown_height = max(assigns.body_height + 2 - title_height, 1)
     markdown_width = assigns.body_width + 4
 
     assigns =

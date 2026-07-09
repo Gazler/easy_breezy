@@ -20,6 +20,7 @@ defmodule EasyBreezy.DeckMarkdownTest do
                  layout: :title,
                  payload: %{
                    title: "Intro",
+                   prefix: "Chapter 1",
                    subtitle: "Terminal slides",
                    speaker: "Gazler",
                    footer: "Built on Breeze"
@@ -42,6 +43,7 @@ defmodule EasyBreezy.DeckMarkdownTest do
              id: intro
              layout: title
              title: Intro
+             prefix: Chapter 1
              subtitle: Terminal slides
              speaker: Gazler
              footer: Built on Breeze
@@ -133,6 +135,33 @@ defmodule EasyBreezy.DeckMarkdownTest do
 
              - One
              - Two
+             """)
+  end
+
+  test "keeps trailing markdown for bullet slides" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 title: "Why",
+                 layout: :bullets,
+                 payload: %{
+                   title: "Why",
+                   items: ["One", "Two"],
+                   after_markdown: "Final **note** with `code`."
+                 },
+                 steps: 2
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: bullets
+             title: Why
+             ---
+             - One
+             - Two
+
+             Final **note** with `code`.
              """)
   end
 

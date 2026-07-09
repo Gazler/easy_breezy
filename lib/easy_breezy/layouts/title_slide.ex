@@ -6,6 +6,7 @@ defmodule EasyBreezy.Layouts.TitleSlide do
   import EasyBreezy.Typography
 
   attr :slide_id, :any, default: nil
+  attr :prefix, :string, default: nil
   attr :title, :string, required: true
   attr :subtitle, :string, default: nil
   attr :speaker, :string, default: nil
@@ -16,7 +17,7 @@ defmodule EasyBreezy.Layouts.TitleSlide do
   def title_slide(assigns) do
     assigns =
       Map.merge(
-        %{subtitle: nil, speaker: nil, footer: nil, font: nil, render_context: %{}},
+        %{prefix: nil, subtitle: nil, speaker: nil, footer: nil, font: nil, render_context: %{}},
         assigns
       )
 
@@ -29,6 +30,7 @@ defmodule EasyBreezy.Layouts.TitleSlide do
       |> assign(theme_colors: theme_colors)
       |> assign(animate_title_gradient?: animate_title_gradient?)
       |> assign(animation_frozen_now: animation_frozen_now)
+      |> assign(title_region_style: title_region_style(assigns))
       |> assign(
         title_gradient_implicit:
           if(animate_title_gradient?, do: EasyBreezy.Implicit.TitleGradient, else: nil)
@@ -47,7 +49,10 @@ defmodule EasyBreezy.Layouts.TitleSlide do
     ~H"""
     <box class="grid grid-cols-1 grid-rows-3 width-full height-full">
       {@title}
-      <box>
+      <box style={@title_region_style}>
+        <box :if={@prefix} class="bold text-secondary">{@prefix}</box>
+        <box :if={@prefix}>
+        </box>
         <.h1
           id={@title_gradient_id}
           implicit={@title_gradient_implicit}
@@ -78,5 +83,22 @@ defmodule EasyBreezy.Layouts.TitleSlide do
       </box>
     </box>
     """
+  end
+
+  defp title_region_style(%{prefix: nil}), do: nil
+  defp title_region_style(%{prefix: ""}), do: nil
+
+  defp title_region_style(assigns) do
+    font = assigns.font || :ansi_shadow
+
+    title_height =
+      assigns.title
+      |> String.trim_trailing("\n")
+      |> String.upcase()
+      |> EasyBreezy.Figlet.render(font, trim_vertical: true)
+      |> String.split("\n")
+      |> length()
+
+    %{height: title_height + 2}
   end
 end

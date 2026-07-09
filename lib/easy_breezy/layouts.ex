@@ -36,6 +36,7 @@ defmodule EasyBreezy.Layouts do
               left_mermaid_source: nil,
               left_mode: :text,
               left_path: nil,
+              prefix: nil,
               subtitle: nil,
               speaker: nil,
               footer: nil,
@@ -55,6 +56,7 @@ defmodule EasyBreezy.Layouts do
               live_id: nil,
               start_opts: [],
               assigns: %{},
+              after_markdown: nil,
               breeze_class: "width-full height-full",
               breeze_style: nil,
               breeze_focusable: true,
@@ -69,6 +71,7 @@ defmodule EasyBreezy.Layouts do
     <.title_slide
       :if={@slide.layout == :title}
       slide_id={@slide.id}
+      prefix={@slide_payload.prefix}
       title={@slide_payload.title}
       subtitle={@slide_payload.subtitle}
       speaker={@slide_payload.speaker}
@@ -80,8 +83,10 @@ defmodule EasyBreezy.Layouts do
       :if={@slide.layout == :bullets}
       title={@slide_payload.title}
       items={@slide_payload.items}
+      after_markdown={@slide_payload.after_markdown}
       step={@step}
       body_width={@body_width}
+      body_height={@body_height}
       render_context={@render_context}
     />
     <.two_column_slide
