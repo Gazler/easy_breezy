@@ -39,6 +39,8 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
     right_title = Map.get(assigns, :right_title)
     reveal = Map.get(assigns, :reveal, :step)
     immediate? = immediate_reveal?(reveal)
+    image_active? = Map.get(assigns.render_context, :render_images?, true) != false
+    image_scope = Map.get(assigns.render_context, :image_scope, "slide")
     visible_items = visible_items(left_items, assigns.step, immediate?)
 
     left_width = max(div(assigns.body_width, 2) - 4, 16)
@@ -90,8 +92,10 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
         right_mermaid_source: right_mermaid_source,
         right_mode: right_mode,
         right_path: right_path,
-        right_title: right_title
+        right_title: right_title,
+        image_active?: image_active?
       )
+      |> assign(image_scope: image_scope)
       |> assign(left_lines: left_lines)
       |> assign(panel_height: panel_height)
       |> assign(visible_right_lines: visible_right_lines)
@@ -144,7 +148,8 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
             implicit={EasyBreezy.Slideshow.KittyImage}
             image-path={@left_path}
             image-mode="show"
-            image-active={true}
+            image-active={@image_active?}
+            image-scope={"#{@image_scope}:left"}
             style={@left_image_style}
             class="width-full border-rounded border border-stroke bg-panel"
           >
@@ -176,7 +181,8 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
             implicit={EasyBreezy.Slideshow.KittyImage}
             image-path={@right_path}
             image-mode="show"
-            image-active={true}
+            image-active={@image_active?}
+            image-scope={"#{@image_scope}:right"}
             style={@right_image_style}
             class="width-full border-rounded border border-stroke bg-panel"
           >
