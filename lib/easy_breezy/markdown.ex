@@ -1,6 +1,8 @@
 defmodule EasyBreezy.Markdown do
   @moduledoc false
 
+  alias EasyBreezy.Layouts.CodeSlide
+
   @code "\e[36m"
 
   def render(doc, width, opts \\ []) when is_binary(doc) do
@@ -11,7 +13,7 @@ defmodule EasyBreezy.Markdown do
     |> String.split(["\r\n", "\n"], trim: false)
     |> Enum.map(&String.trim_trailing/1)
     |> markdown_blocks()
-    |> render_blocks(width, reset)
+    |> render_blocks(width, opts, reset)
   end
 
   def render_bullet(text, width, opts \\ []) do
@@ -105,22 +107,26 @@ defmodule EasyBreezy.Markdown do
     end
   end
 
-  defp render_block({:markdown, content}, width, reset) do
+  defp render_block({:markdown, content}, width, _opts, reset) do
     Breeze.Markdown.render(content, width, reset: reset)
   end
 
-  defp render_block({:code_fence, lines}, _width, reset) do
-    lines
-    |> code_fence_content_lines()
-    |> Enum.map(&(@code <> &1 <> reset))
+  defp render_block({:code_fence, lines}, width, opts, reset) do
+    language = code_fence_language(lines)
+    content_lines = code_fence_content_lines(lines)
+
+    content_lines
+    |> highlight_code_fence_lines(language, width, opts)
+    |> Enum.map(&code_line(&1, width, opts, reset))
     |> Enum.join("\n")
   end
 
-  defp render_block({:list, lines}, width, reset), do: render_list_block(lines, width, reset)
+  defp render_block({:list, lines}, width, _opts, reset),
+    do: render_list_block(lines, width, reset)
 
-  defp render_blocks(blocks, width, reset) do
+  defp render_blocks(blocks, width, opts, reset) do
     blocks
-    |> Enum.map(fn block -> {block_type(block), render_block(block, width, reset)} end)
+    |> Enum.map(fn block -> {block_type(block), render_block(block, width, opts, reset)} end)
     |> Enum.reject(fn {_type, rendered} -> rendered == "" end)
     |> join_rendered_blocks()
   end
@@ -157,7 +163,77 @@ defmodule EasyBreezy.Markdown do
 
   defp code_fence_content_lines([]), do: []
 
+  defp code_fence_language([opening | _rest]) do
+    case Regex.run(~r/^```\s*([a-zA-Z0-9_+.-]+)/, String.trim_leading(opening)) do
+      [_match, language] -> String.downcase(language)
+      _other -> nil
+    end
+  end
+
+  defp code_fence_language(_lines), do: nil
+
   defp code_fence_line?(line), do: line |> String.trim_leading() |> String.starts_with?("```")
+
+  defp highlight_code_fence_lines(lines, language, width, opts)
+       when language in ["elixir", "ex", "exs"] do
+    lines
+    |> Enum.join("\n")
+    |> CodeSlide.highlight_source_lines(
+      "elixir",
+      Keyword.get(opts, :code_theme, "github_dark"),
+      Keyword.get(opts, :theme_colors, %{}),
+      background: Keyword.get(opts, :code_background, :panel),
+      width: width
+    )
+  end
+
+  defp highlight_code_fence_lines(lines, _language, _width, _opts), do: lines
+
+  defp code_line(line, width, opts, reset) do
+    code_reset = code_reset(opts)
+
+    line =
+      if String.contains?(line, "\e[") do
+        code_reset <> line
+      else
+        code_reset <> @code <> line
+      end
+
+    padding =
+      if code_reset == "" do
+        ""
+      else
+        code_reset <> String.duplicate(" ", max(width - visible_width(line), 0))
+      end
+
+    line <> padding <> reset
+  end
+
+  defp code_reset(opts) do
+    opts
+    |> Keyword.get(:theme_colors, %{})
+    |> ansi_reset(
+      Keyword.get(opts, :code_background, :panel),
+      Keyword.get(opts, :code_foreground, :text)
+    )
+  end
+
+  defp ansi_reset(theme_colors, background, foreground) when is_map(theme_colors) do
+    case {Map.get(theme_colors, background), Map.get(theme_colors, foreground)} do
+      {{br, bg, bb}, {fr, fg, fb}} -> "\e[48;2;#{br};#{bg};#{bb};38;2;#{fr};#{fg};#{fb}m"
+      {{br, bg, bb}, _foreground} -> "\e[48;2;#{br};#{bg};#{bb}m"
+      {_background, {fr, fg, fb}} -> "\e[38;2;#{fr};#{fg};#{fb}m"
+      _other -> ""
+    end
+  end
+
+  defp ansi_reset(_theme_colors, _background, _foreground), do: ""
+
+  defp visible_width(content) do
+    content
+    |> String.replace(~r/\e\[[0-9;]*m/, "")
+    |> String.length()
+  end
 
   defp render_list_block(lines, width, reset) do
     bullets = Enum.map(lines, &parse_bullet_line/1)

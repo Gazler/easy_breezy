@@ -83,7 +83,7 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
   end
 
   defp render_blocks(blocks, assigns, step, markdown_width, markdown_height) do
-    reset = markdown_restore(assigns.render_context)
+    render_opts = markdown_render_opts(assigns.render_context)
     env = __ENV__
 
     blocks
@@ -93,7 +93,7 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
       {%{type: :markdown, content: content}, next_block} ->
         %{
           type: :markdown,
-          rendered: MarkdownRenderer.render(content, markdown_width, reset: reset),
+          rendered: MarkdownRenderer.render(content, markdown_width, render_opts),
           blank_after?: blank_after_markdown?(content, next_block)
         }
 
@@ -145,6 +145,15 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
       markdown_width: markdown_width,
       markdown_height: markdown_height
     })
+  end
+
+  defp markdown_render_opts(render_context) do
+    [
+      reset: markdown_restore(render_context),
+      theme_colors: Map.get(render_context, :theme_colors, %{}),
+      code_theme: Map.get(render_context, :code_theme, "github_dark"),
+      code_background: :panel
+    ]
   end
 
   defp markdown_restore(%{theme_colors: %{surface: {br, bg, bb}, text: {tr, tg, tb}}}) do

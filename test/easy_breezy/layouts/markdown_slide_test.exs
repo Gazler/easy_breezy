@@ -156,6 +156,35 @@ defmodule EasyBreezy.Layouts.MarkdownSlideTest do
     ])
   end
 
+  test "markdown slides highlight elixir fences on a panel background" do
+    deck =
+      Markdown.parse!("""
+      ---
+      layout: markdown
+      title: Code
+      ---
+      ```elixir
+      terminal = Termite.Terminal.start()
+      ```
+      """)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.Slideshow,
+        size: {84, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, themes: [:nebula], theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    rendered = Breeze.Test.render!(session)
+    plain = strip_ansi(rendered)
+
+    assert plain =~ "terminal = Termite.Terminal.start()"
+    assert rendered =~ "\e[48;2;31;70;98"
+    assert rendered =~ "\e[38;2;"
+  end
+
   test "markdown slides render breeze fences" do
     deck =
       Markdown.parse!("""

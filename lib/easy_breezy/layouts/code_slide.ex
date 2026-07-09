@@ -18,6 +18,31 @@ defmodule EasyBreezy.Layouts.CodeSlide do
   def lumis_theme_name(:solarized_light), do: "solarized_spring_light"
   def lumis_theme_name(_theme_name), do: "github_dark_dimmed"
 
+  def highlight_source_lines(source, language, code_theme, theme_colors, opts \\ []) do
+    if Code.ensure_loaded?(Lumis) and function_exported?(Lumis, :highlight!, 2) do
+      default_bg =
+        theme_colors
+        |> Map.get(Keyword.get(opts, :background, :panel))
+        |> rgb_color_to_hex()
+
+      source
+      |> Lumis.highlight!(
+        formatter:
+          {:terminal,
+           language: language,
+           theme: code_theme,
+           background: default_bg,
+           width: Keyword.get(opts, :width)}
+      )
+      |> split_code_lines()
+      |> normalize_code_line_resets(theme_colors, opts)
+    else
+      split_code_lines(source)
+    end
+  rescue
+    _ -> split_code_lines(source)
+  end
+
   def step_count(focus_ranges) do
     if step_indexed_focus_ranges?(focus_ranges) do
       max(length(focus_ranges) - 1, 0)
@@ -292,28 +317,16 @@ defmodule EasyBreezy.Layouts.CodeSlide do
   end
 
   defp highlight_code_lines(source, language, code_theme, theme_colors) do
-    if Code.ensure_loaded?(Lumis) and function_exported?(Lumis, :highlight!, 2) do
-      default_bg =
-        case Map.get(theme_colors, :panel) do
-          {r, g, b} -> rgb_to_hex(r, g, b)
-          _ -> nil
-        end
-
-      source
-      |> Lumis.highlight!(
-        formatter: {:terminal, language: language, theme: code_theme, background: default_bg}
-      )
-      |> split_code_lines()
-      |> normalize_code_line_resets(theme_colors)
-    else
-      split_code_lines(source)
-    end
-  rescue
-    _ -> split_code_lines(source)
+    highlight_source_lines(source, language, code_theme, theme_colors, background: :panel)
   end
 
-  defp normalize_code_line_resets(lines, theme_colors) when is_list(lines) do
-    restore = ansi_panel_restore(theme_colors)
+  defp normalize_code_line_resets(lines, theme_colors, opts) when is_list(lines) do
+    restore =
+      ansi_restore(
+        theme_colors,
+        Keyword.get(opts, :background, :panel),
+        Keyword.get(opts, :foreground, :text)
+      )
 
     if restore == "" do
       lines
@@ -480,6 +493,9 @@ defmodule EasyBreezy.Layouts.CodeSlide do
     }
   end
 
+  defp rgb_color_to_hex({r, g, b}), do: rgb_to_hex(r, g, b)
+  defp rgb_color_to_hex(_color), do: nil
+
   defp rgb_to_hex(r, g, b) do
     "#" <>
       String.pad_leading(Integer.to_string(r, 16), 2, "0") <>
@@ -583,15 +599,18 @@ defmodule EasyBreezy.Layouts.CodeSlide do
 
   defp ansi_gutter_style(_color, theme_colors), do: ansi_panel_restore(theme_colors)
 
-  defp ansi_panel_restore(%{panel: {pr, pg, pb}, text: {tr, tg, tb}}) do
-    "\e[48;2;#{pr};#{pg};#{pb};38;2;#{tr};#{tg};#{tb}m"
+  defp ansi_panel_restore(theme_colors), do: ansi_restore(theme_colors, :panel, :text)
+
+  defp ansi_restore(theme_colors, background, foreground) when is_map(theme_colors) do
+    case {Map.get(theme_colors, background), Map.get(theme_colors, foreground)} do
+      {{br, bg, bb}, {fr, fg, fb}} -> "\e[48;2;#{br};#{bg};#{bb};38;2;#{fr};#{fg};#{fb}m"
+      {{br, bg, bb}, _foreground} -> "\e[48;2;#{br};#{bg};#{bb}m"
+      {_background, {fr, fg, fb}} -> "\e[38;2;#{fr};#{fg};#{fb}m"
+      _other -> ""
+    end
   end
 
-  defp ansi_panel_restore(%{panel: {pr, pg, pb}}) do
-    "\e[48;2;#{pr};#{pg};#{pb}m"
-  end
-
-  defp ansi_panel_restore(_theme_colors), do: ""
+  defp ansi_restore(_theme_colors, _background, _foreground), do: ""
 
   defp line_end_restore(line, body_width, theme_colors) do
     if visible_width(line) > body_width do

@@ -90,7 +90,7 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
   defp render_after_markdown_blocks(assigns, true) do
     width = assigns.body_width
     height = max(assigns.body_height, 1)
-    reset = markdown_restore(assigns.render_context)
+    render_opts = markdown_render_opts(assigns.render_context)
     env = __ENV__
 
     assigns.after_markdown
@@ -100,7 +100,7 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
       {%{type: :markdown, content: content}, next_block} ->
         %{
           type: :markdown,
-          rendered: MarkdownRenderer.render(content, width, reset: reset),
+          rendered: MarkdownRenderer.render(content, width, render_opts),
           blank_after?: blank_after_markdown?(content, next_block)
         }
 
@@ -139,6 +139,15 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
       body_width: width,
       body_height: height
     })
+  end
+
+  defp markdown_render_opts(render_context) do
+    [
+      reset: markdown_restore(render_context),
+      theme_colors: Map.get(render_context, :theme_colors, %{}),
+      code_theme: Map.get(render_context, :code_theme, "github_dark"),
+      code_background: :panel
+    ]
   end
 
   defp markdown_present?(value) when is_binary(value), do: String.trim(value) != ""
