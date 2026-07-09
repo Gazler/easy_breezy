@@ -17,6 +17,7 @@ defmodule EasyBreezy.Layouts do
   attr :step, :integer, required: true
   attr :body_width, :integer, required: true
   attr :body_height, :integer, required: true
+  attr :live_state, :map, default: %{}
   attr :render_context, :map, default: %{}
 
   def slide_body(assigns) do
@@ -151,6 +152,7 @@ defmodule EasyBreezy.Layouts do
       live_id={@slide_payload[:live_id]}
       start_opts={@slide_payload[:start_opts] || []}
       assigns={@slide_payload[:assigns] || %{}}
+      live_state={@live_state}
       class={@slide_payload[:breeze_class] || @slide_payload[:class] || "width-full height-full"}
       style={@slide_payload[:breeze_style] || @slide_payload[:style]}
       focusable={@slide_payload[:breeze_focusable] != false}

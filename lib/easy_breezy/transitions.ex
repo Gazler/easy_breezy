@@ -20,6 +20,7 @@ defmodule EasyBreezy.Transitions do
   attr :deck, :map, required: true
   attr :body_width, :integer, required: true
   attr :body_height, :integer, required: true
+  attr :live_state, :map, default: %{}
   attr :render_context, :map, default: %{}
 
   def slide_transition(assigns) do
@@ -64,6 +65,7 @@ defmodule EasyBreezy.Transitions do
           step={@transition.from_step}
           body_width={@body_width}
           body_height={@body_height}
+          live_state={@live_state}
           render_context={@transition_render_context}
         />
       </box>
@@ -76,6 +78,7 @@ defmodule EasyBreezy.Transitions do
           step={@transition.to_step}
           body_width={@body_width}
           body_height={@body_height}
+          live_state={@live_state}
           render_context={@transition_render_context}
         />
       </box>
