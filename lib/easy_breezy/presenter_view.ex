@@ -4,6 +4,7 @@ defmodule EasyBreezy.PresenterView do
   use Breeze.View
 
   alias EasyBreezy.Layouts.CodeSlide
+  alias EasyBreezy.PresenterScroll
   alias EasyBreezy.Slideshow.KittyImage
   alias Breeze.Theme
 
@@ -45,6 +46,7 @@ defmodule EasyBreezy.PresenterView do
       )
       |> assign_code_theme(theme_name)
       |> assign_theme_colors()
+      |> put_local_keybindings(scroll_keybindings())
       |> subscribe_to_presentation()
 
     Process.send_after(self(), :clock_tick, @clock_tick_ms)
@@ -240,6 +242,7 @@ defmodule EasyBreezy.PresenterView do
       )
       |> assign_theme(theme_name)
       |> clamp_position()
+      |> PresenterScroll.import(Map.get(payload, :scroll_state))
       |> maybe_delete_presenter_image_overlay(previous_term)
 
     {:noreply, term}
@@ -261,6 +264,20 @@ defmodule EasyBreezy.PresenterView do
   defp send_command(term, command) do
     EasyBreezy.PresenterSync.command(term.assigns.sync_name, command)
     term
+  end
+
+  defp scroll_keybindings do
+    Enum.map(PresenterScroll.keys(), fn key ->
+      {key, fn event, term -> {:noreply, sync_scroll(term, event)} end}
+    end)
+  end
+
+  defp sync_scroll(term, event) do
+    scroll_event = PresenterScroll.event(event)
+
+    term
+    |> PresenterScroll.apply(scroll_event)
+    |> send_command({:scroll, scroll_event})
   end
 
   defp current_position(%{deck: %{slides: slides}, slide_index: slide_index, step: step}) do

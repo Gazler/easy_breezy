@@ -64,6 +64,67 @@ defmodule EasyBreezy.PresenterViewTest do
              "┌────────────────────────────────────────────────────────────────────────────────────┐ ┌Next: Why Breeze"
   end
 
+  test "arrow-key scrolling updates presenter scroll state and sends a presentation command" do
+    sync_name = {:easy_breezy_test, System.unique_integer([:positive])}
+    EasyBreezy.PresenterSync.register(sync_name)
+    deck = long_bullets_deck()
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula, alt_screen: false, sync_name: sync_name]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert_receive {:easy_breezy_presenter_subscribe, _pid}
+
+    payload =
+      deck
+      |> presentation_payload(0)
+      |> Map.merge(%{step: 29, screen_width: 80, screen_height: 12})
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+    Breeze.Test.render!(session)
+
+    assert scroll_offset(session, "slide-bullets") == 0
+
+    Breeze.Test.input(session, "ArrowDown")
+
+    assert_receive {:easy_breezy_presenter_command, _pid, {:scroll, %{"key" => "ArrowDown"}}}
+
+    assert scroll_offset(session, "slide-bullets") > 0
+  end
+
+  test "presentation scroll state payload syncs the presenter preview" do
+    deck = long_bullets_deck()
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula, alt_screen: false]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    payload =
+      deck
+      |> presentation_payload(0)
+      |> Map.merge(%{
+        step: 29,
+        screen_width: 80,
+        screen_height: 12,
+        scroll_state: %{"slide-bullets" => %{offset_y: 4, autoscroll: nil, pinned_bottom: false}}
+      })
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+    Breeze.Test.render!(session)
+
+    assert scroll_offset(session, "slide-bullets") == 4
+  end
+
   defp recording_terminal(owner) do
     %Termite.Terminal{
       adapter: {RecordingTerminal, %{owner: owner}},
@@ -124,7 +185,27 @@ defmodule EasyBreezy.PresenterViewTest do
     }
   end
 
+  defp long_bullets_deck do
+    %Deck{
+      title: "Presenter Test",
+      slides: [
+        %Slide{
+          id: :long,
+          title: "Long",
+          layout: :bullets,
+          payload: %{title: "Long", items: Enum.map(1..30, &"Item #{&1}")},
+          steps: 29
+        }
+      ]
+    }
+  end
+
   defp text_payload(title), do: %{title: title, items: ["One"]}
 
   defp strip_ansi(text), do: Regex.replace(~r/\e\[[0-9;]*m/, text, "")
+
+  defp scroll_offset(session, id) do
+    {Breeze.Implicit.Scroll, state} = Breeze.Test.metadata(session).implicit_state[id]
+    state.offset_y
+  end
 end

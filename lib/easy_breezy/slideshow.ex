@@ -2,12 +2,15 @@ defmodule EasyBreezy.Slideshow do
   use Breeze.View
 
   alias EasyBreezy.Layouts.CodeSlide
+  alias EasyBreezy.PresenterScroll
   import Breeze.Blocks
   import EasyBreezy.Layouts
   import EasyBreezy.Transitions
   alias Breeze.Theme
 
   @themes Theme.default_cycle()
+  # Breeze's direct server input path leaves CSI-u Escape as "27u".
+  @escape_keys ["Escape", "Esc", "\e", "27u"]
 
   def mount(opts, term) do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
@@ -39,6 +42,7 @@ defmodule EasyBreezy.Slideshow do
         goto_slide_error: nil
       )
       |> assign_theme_context()
+      |> maybe_put_scroll_keybindings()
       |> maybe_register_presentation()
       |> maybe_publish_presentation_soon()
 
@@ -161,7 +165,7 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_event(_, %{"key" => key}, %{assigns: %{goto_modal?: true}} = term)
-      when key in ["Escape", "Esc", "\e"] do
+      when key in @escape_keys do
     {:noreply, close_goto_slide(term)}
   end
 
@@ -218,7 +222,7 @@ defmodule EasyBreezy.Slideshow do
      |> maybe_publish_presentation_soon()}
   end
 
-  def handle_event(_, %{"key" => key}, term) when key in ["q", "Escape"] do
+  def handle_event(_, %{"key" => key}, term) when key in ["q" | @escape_keys] do
     {:stop, term}
   end
 
@@ -407,6 +411,24 @@ defmodule EasyBreezy.Slideshow do
 
   defp maybe_register_presentation(term), do: term
 
+  defp maybe_put_scroll_keybindings(%{assigns: %{presenter_mode: :presentation}} = term) do
+    put_local_keybindings(term, scroll_keybindings())
+  end
+
+  defp maybe_put_scroll_keybindings(term), do: term
+
+  defp scroll_keybindings do
+    Enum.map(PresenterScroll.keys(), fn key ->
+      {key, fn event, term -> {:noreply, scroll_and_publish(term, event)} end}
+    end)
+  end
+
+  defp scroll_and_publish(term, event) do
+    term
+    |> PresenterScroll.apply(PresenterScroll.event(event))
+    |> maybe_publish_presentation_soon()
+  end
+
   defp maybe_publish_presentation_soon(%{assigns: %{presenter_mode: :presentation}} = term) do
     send(self(), :publish_presentation_state)
     term
@@ -417,13 +439,15 @@ defmodule EasyBreezy.Slideshow do
   defp maybe_publish_presentation(%{assigns: %{presenter_mode: :presentation}} = term) do
     EasyBreezy.PresenterSync.publish(
       ensure_map_set(term.assigns.presenter_subscribers),
-      presentation_payload(term.assigns)
+      presentation_payload(term)
     )
   end
 
   defp maybe_publish_presentation(_term), do: :ok
 
-  defp presentation_payload(assigns) do
+  defp presentation_payload(term) do
+    assigns = term.assigns
+
     %{
       deck: assigns.deck,
       slide_index: assigns.slide_index,
@@ -434,7 +458,8 @@ defmodule EasyBreezy.Slideshow do
       started_at_ms: assigns.started_at_ms,
       theme_name: assigns.theme_name,
       actual_theme_mode: assigns.actual_theme_mode,
-      theme_status: assigns.theme_status
+      theme_status: assigns.theme_status,
+      scroll_state: PresenterScroll.export(term)
     }
   end
 
@@ -474,6 +499,12 @@ defmodule EasyBreezy.Slideshow do
     term
     |> Breeze.View.cycle_theme(theme_cycle_opts(term))
     |> assign_theme_context()
+    |> maybe_publish_presentation_soon()
+  end
+
+  defp handle_presenter_command({:scroll, event}, term) when is_map(event) do
+    term
+    |> PresenterScroll.apply(event)
     |> maybe_publish_presentation_soon()
   end
 
