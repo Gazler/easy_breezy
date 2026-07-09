@@ -1,6 +1,6 @@
 %{
-  "back_breeze": {:git, "https://github.com/gazler/back_breeze.git", "17c6643b2f682900494ec62a1e6d6f1dfd825d8a", []},
-  "breeze": {:git, "https://github.com/gazler/breeze.git", "953f55aaac8fcb3867f48b2cfc4b69262bef86c3", []},
+  "back_breeze": {:hex, :back_breeze, "0.4.1", "52f72e9501dfe1067c25291be889ee4bdfc386a90e05118f23d929328f83d898", [:mix], [{:termite, "~> 0.4.2 or ~> 0.5", [hex: :termite, repo: "hexpm", optional: false]}], "hexpm", "24c78388928bce779f435f5dbd93c78750be1d086e3a86bbc06e4a88bd8019d0"},
+  "breeze": {:git, "https://github.com/gazler/breeze.git", "8357b3a85de07a4914024da2627fe684a70e2709", []},
   "file_system": {:hex, :file_system, "1.1.1", "31864f4685b0148f25bd3fbef2b1228457c0c89024ad67f7a81a3ffbc0bbad3a", [:mix], [], "hexpm", "7a15ff97dfe526aeefb090a7a9d3d03aa907e100e262a0f8f7746b78f8f87a5d"},
   "jason": {:hex, :jason, "1.4.4", "b9226785a9aa77b6857ca22832cffa5d5011a667207eb2a0ad56adb5db443b8a", [:mix], [{:decimal, "~> 1.0 or ~> 2.0", [hex: :decimal, repo: "hexpm", optional: true]}], "hexpm", "c5eb0cab91f094599f94d55bc63409236a8ec69a21a67814529e8d5f6cc90b3b"},
   "lumis": {:hex, :lumis, "0.5.0", "1d505ff56fede334cf0de78bace0b00433edddb848f4b1affbcc0dc2234cda2a", [:mix], [{:nimble_options, "~> 1.0", [hex: :nimble_options, repo: "hexpm", optional: false]}, {:rustler, "~> 0.29", [hex: :rustler, repo: "hexpm", optional: true]}, {:rustler_precompiled, "~> 0.6", [hex: :rustler_precompiled, repo: "hexpm", optional: false]}], "hexpm", "142a7aae2a22169a389cf70a6a71426092bc541abe699aab9eef31b36e972cb2"},
@@ -9,5 +9,5 @@
   "rustler": {:hex, :rustler, "0.37.3", "5f4e6634d43b26f0a69834dd1d3ed4e1710b022a053bf4a670220c9540c92602", [:mix], [{:jason, "~> 1.0", [hex: :jason, repo: "hexpm", optional: false]}], "hexpm", "a6872c6f53dcf00486d1e7f9e046e20e01bf1654bdacc4193016c2e8002b32a2"},
   "rustler_precompiled": {:hex, :rustler_precompiled, "0.9.0", "3a052eda09f3d2436364645cc1f13279cf95db310eb0c17b0d8f25484b233aa0", [:mix], [{:rustler, "~> 0.23", [hex: :rustler, repo: "hexpm", optional: true]}], "hexpm", "471d97315bd3bf7b64623418b3693eedd8e47de3d1cb79a0ac8f9da7d770d94c"},
   "telemetry": {:hex, :telemetry, "1.4.1", "ab6de178e2b29b58e8256b92b382ea3f590a47152ca3651ea857a6cae05ac423", [:rebar3], [], "hexpm", "2172e05a27531d3d31dd9782841065c50dd5c3c7699d95266b2edd54c2dafa1c"},
-  "termite": {:git, "https://github.com/gazler/termite.git", "c391cac1b55e463d9ffc00c2c84bfa750483ba1b", []},
+  "termite": {:hex, :termite, "0.4.3", "013cc484312153b9d9aa8bec532b5620a978ec086fbfe4fc19442ac66fe159a8", [:mix], [], "hexpm", "5dcf47991ad180f070ee84dd0086d31ee98869ff2e1b93c5a7a87196d4ef7557"},
 }

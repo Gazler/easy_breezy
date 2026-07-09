@@ -2,6 +2,7 @@ defmodule EasyBreezy.Slideshow do
   use Breeze.View
 
   alias EasyBreezy.Layouts.CodeSlide
+  alias EasyBreezy.LiveSlide
   alias EasyBreezy.PresenterScroll
   import Breeze.Blocks
   import EasyBreezy.Layouts
@@ -11,6 +12,16 @@ defmodule EasyBreezy.Slideshow do
   @themes Theme.default_cycle()
   # Breeze's direct server input path leaves CSI-u Escape as "27u".
   @escape_keys ["Escape", "Esc", "\e", "27u"]
+  @live_slide_movement_keys [
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "h",
+    "j",
+    "k",
+    "l"
+  ]
 
   def mount(opts, term) do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
@@ -35,6 +46,7 @@ defmodule EasyBreezy.Slideshow do
         presenter_mode: Keyword.get(opts, :presenter_mode, :single),
         presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
         presenter_subscribers: MapSet.new(),
+        live_state: %{},
         themes: Keyword.get(opts, :themes, @themes),
         started_at_ms: System.monotonic_time(:millisecond),
         goto_modal?: false,
@@ -46,7 +58,7 @@ defmodule EasyBreezy.Slideshow do
       |> maybe_register_presentation()
       |> maybe_publish_presentation_soon()
 
-    {:ok, clamp_position(term)}
+    {:ok, term |> clamp_position() |> focus_visible_live_slide()}
   end
 
   def render(assigns) do
@@ -68,9 +80,11 @@ defmodule EasyBreezy.Slideshow do
         render_context: %{
           theme_colors: assigns.theme_colors,
           code_theme: assigns.code_theme,
-          animate_title_gradient?: true
+          animate_title_gradient?: true,
+          image_scope: "presentation"
         }
       )
+      |> maybe_publish_after_render()
 
     ~H"""
     <box class="width-screen height-screen bg text">
@@ -91,6 +105,7 @@ defmodule EasyBreezy.Slideshow do
               deck={@deck}
               body_width={@body_width}
               body_height={@body_height}
+              live_state={@live_state}
               render_context={@render_context}
             />
             <.slide_body
@@ -99,6 +114,7 @@ defmodule EasyBreezy.Slideshow do
               step={@visible_step}
               body_width={@body_width}
               body_height={@body_height}
+              live_state={@live_state}
               render_context={@render_context}
             />
           </box>
@@ -177,11 +193,27 @@ defmodule EasyBreezy.Slideshow do
     {:noreply, open_goto_slide(term)}
   end
 
-  def handle_event(_, %{"key" => key}, term) when key in [" ", "ArrowRight", "l", "PageDown"] do
+  def handle_event(_, %{"key" => key}, term) when key in @live_slide_movement_keys do
+    cond do
+      key in ["ArrowRight", "l"] ->
+        {:noreply, term |> advance() |> maybe_publish_presentation_soon()}
+
+      key in ["ArrowLeft", "h"] ->
+        {:noreply, term |> retreat() |> maybe_publish_presentation_soon()}
+
+      visible_synced_live_slide?(term.assigns) ->
+        {:noreply, focus_visible_live_slide(term)}
+
+      true ->
+        {:noreply, term}
+    end
+  end
+
+  def handle_event(_, %{"key" => key}, term) when key in [" ", "PageDown"] do
     {:noreply, term |> advance() |> maybe_publish_presentation_soon()}
   end
 
-  def handle_event(_, %{"key" => key}, term) when key in ["ArrowLeft", "h", "PageUp"] do
+  def handle_event(_, %{"key" => "PageUp"}, term) do
     {:noreply, term |> retreat() |> maybe_publish_presentation_soon()}
   end
 
@@ -189,6 +221,7 @@ defmodule EasyBreezy.Slideshow do
     {:noreply,
      term
      |> jump_to_position(0, 0)
+     |> focus_visible_live_slide()
      |> maybe_publish_presentation_soon()}
   end
 
@@ -199,6 +232,7 @@ defmodule EasyBreezy.Slideshow do
     {:noreply,
      term
      |> jump_to_position(last_index, last_slide.steps)
+     |> focus_visible_live_slide()
      |> maybe_publish_presentation_soon()}
   end
 
@@ -239,7 +273,7 @@ defmodule EasyBreezy.Slideshow do
 
   def handle_info(:publish_presentation_state, term) do
     maybe_publish_presentation(term)
-    {:noreply, term}
+    {:noreply, term, invalidate: false}
   end
 
   def handle_info({:easy_breezy_presenter_subscribe, pid}, term) when is_pid(pid) do
@@ -254,6 +288,33 @@ defmodule EasyBreezy.Slideshow do
 
     maybe_publish_presentation(term)
     {:noreply, term}
+  end
+
+  def handle_info({:easy_breezy_presenter_state_request, pid}, term) when is_pid(pid) do
+    if request_server_live_snapshot(term) == :requested do
+      :ok
+    else
+      publish_presentation(term, [pid], presentation_live_snapshot(term))
+    end
+
+    {:noreply, term, invalidate: false}
+  end
+
+  def handle_info({:breeze_live_snapshot, _ref, id, {:ok, snapshot}}, term)
+      when is_binary(id) and is_map(snapshot) do
+    if id == visible_live_slide_id(term.assigns) do
+      publish_presentation(term, normalize_live_snapshot(snapshot, id))
+    end
+
+    {:noreply, term, invalidate: false}
+  end
+
+  def handle_info({:breeze_live_snapshot, _ref, id, _reply}, term) do
+    if id == visible_live_slide_id(term.assigns) do
+      publish_presentation(term, nil)
+    end
+
+    {:noreply, term, invalidate: false}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, term) when is_pid(pid) do
@@ -278,6 +339,7 @@ defmodule EasyBreezy.Slideshow do
          step: transition.to_step,
          transition: nil
        )
+       |> focus_visible_live_slide()
        |> maybe_publish_presentation_soon()}
     else
       Process.send_after(self(), :transition_tick, transition.interval_ms)
@@ -333,37 +395,40 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp advance(term) do
-    if term.assigns.transition do
-      term
-    else
-      slide = current_slide(term.assigns)
+    term =
+      if term.assigns.transition do
+        term
+      else
+        slide = current_slide(term.assigns)
 
-      cond do
-        term.assigns.step < slide.steps ->
-          assign(term, step: term.assigns.step + 1)
+        cond do
+          term.assigns.step < slide.steps ->
+            assign(term, step: term.assigns.step + 1)
 
-        term.assigns.slide_index < length(term.assigns.deck.slides) - 1 ->
-          next_index = term.assigns.slide_index + 1
-          next_slide = Enum.at(term.assigns.deck.slides, next_index)
-          direction = EasyBreezy.Transitions.direction(next_slide, :forward)
+          term.assigns.slide_index < length(term.assigns.deck.slides) - 1 ->
+            next_index = term.assigns.slide_index + 1
+            next_slide = Enum.at(term.assigns.deck.slides, next_index)
+            direction = EasyBreezy.Transitions.direction(next_slide, :forward)
 
-          if EasyBreezy.Transitions.enabled?(
-               slide,
-               next_slide,
-               direction,
-               term.assigns.actual_theme_mode
-             ) do
-            EasyBreezy.Transitions.start(term, next_index, 0, direction)
-          else
+            if EasyBreezy.Transitions.enabled?(
+                 slide,
+                 next_slide,
+                 direction,
+                 term.assigns.actual_theme_mode
+               ) do
+              EasyBreezy.Transitions.start(term, next_index, 0, direction)
+            else
+              term
+              |> assign(slide_index: next_index, step: 0)
+              |> maybe_delete_image_overlay(slide)
+            end
+
+          true ->
             term
-            |> assign(slide_index: next_index, step: 0)
-            |> maybe_delete_image_overlay(slide)
-          end
-
-        true ->
-          term
+        end
       end
-    end
+
+    focus_visible_live_slide(term)
   end
 
   defp maybe_enter_alt_screen(term, opts) do
@@ -424,9 +489,13 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp scroll_and_publish(term, event) do
-    term
-    |> PresenterScroll.apply(PresenterScroll.event(event))
-    |> maybe_publish_presentation_soon()
+    if visible_synced_live_slide?(term.assigns) do
+      focus_visible_live_slide(term)
+    else
+      term
+      |> PresenterScroll.apply(PresenterScroll.event(event))
+      |> maybe_publish_presentation_soon()
+    end
   end
 
   defp maybe_publish_presentation_soon(%{assigns: %{presenter_mode: :presentation}} = term) do
@@ -437,21 +506,45 @@ defmodule EasyBreezy.Slideshow do
   defp maybe_publish_presentation_soon(term), do: term
 
   defp maybe_publish_presentation(%{assigns: %{presenter_mode: :presentation}} = term) do
-    EasyBreezy.PresenterSync.publish(
-      ensure_map_set(term.assigns.presenter_subscribers),
-      presentation_payload(term)
-    )
+    if request_server_live_snapshot(term) == :requested do
+      :ok
+    else
+      publish_presentation(term, presentation_live_snapshot(term))
+    end
   end
 
   defp maybe_publish_presentation(_term), do: :ok
 
-  defp presentation_payload(term) do
+  defp publish_presentation(term, live_snapshot) do
+    publish_presentation(term, ensure_map_set(term.assigns.presenter_subscribers), live_snapshot)
+  end
+
+  defp publish_presentation(term, subscribers, live_snapshot) do
+    subscribers = ensure_map_set(subscribers)
+
+    if MapSet.size(subscribers) > 0 do
+      EasyBreezy.PresenterSync.publish(subscribers, presentation_payload(term, live_snapshot))
+    end
+  end
+
+  defp maybe_publish_after_render(%{presenter_mode: :presentation} = assigns) do
+    if assigns.presenter_subscribers |> ensure_map_set() |> MapSet.size() > 0 do
+      send(self(), :publish_presentation_state)
+    end
+
+    assigns
+  end
+
+  defp maybe_publish_after_render(assigns), do: assigns
+
+  defp presentation_payload(term, live_snapshot) do
     assigns = term.assigns
+    {_slide, slide_index, step} = visible_position(assigns)
 
     %{
       deck: assigns.deck,
-      slide_index: assigns.slide_index,
-      step: assigns.step,
+      slide_index: slide_index,
+      step: step,
       screen_width: assigns.screen_width,
       screen_height: assigns.screen_height,
       presenter?: assigns.presenter?,
@@ -459,6 +552,7 @@ defmodule EasyBreezy.Slideshow do
       theme_name: assigns.theme_name,
       actual_theme_mode: assigns.actual_theme_mode,
       theme_status: assigns.theme_status,
+      live_snapshot: live_snapshot,
       scroll_state: PresenterScroll.export(term)
     }
   end
@@ -472,6 +566,7 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp ensure_map_set(%MapSet{} = set), do: set
+  defp ensure_map_set(values) when is_list(values), do: MapSet.new(values)
   defp ensure_map_set(_value), do: MapSet.new()
 
   defp handle_presenter_command(:next, term),
@@ -483,6 +578,7 @@ defmodule EasyBreezy.Slideshow do
   defp handle_presenter_command(:home, term) do
     term
     |> jump_to_position(0, 0)
+    |> focus_visible_live_slide()
     |> maybe_publish_presentation_soon()
   end
 
@@ -492,6 +588,7 @@ defmodule EasyBreezy.Slideshow do
 
     term
     |> jump_to_position(last_index, last_slide.steps)
+    |> focus_visible_live_slide()
     |> maybe_publish_presentation_soon()
   end
 
@@ -503,44 +600,139 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp handle_presenter_command({:scroll, event}, term) when is_map(event) do
-    term
-    |> PresenterScroll.apply(event)
-    |> maybe_publish_presentation_soon()
+    if visible_synced_live_slide?(term.assigns) do
+      focus_visible_live_slide(term)
+    else
+      term
+      |> PresenterScroll.apply(event)
+      |> maybe_publish_presentation_soon()
+    end
+  end
+
+  defp handle_presenter_command({:input, %{"key" => _key} = event}, term) do
+    case dispatch_visible_live_input(term, event) do
+      {:consumed, term} -> maybe_publish_presentation_soon(term)
+      {:not_consumed, term} -> handle_presenter_key_event(event, term)
+    end
   end
 
   defp handle_presenter_command(_command, term), do: term
 
-  defp retreat(term) do
-    if term.assigns.transition do
-      term
-    else
-      cond do
-        term.assigns.step > 0 ->
-          assign(term, step: term.assigns.step - 1)
+  defp handle_presenter_key_event(%{"key" => key}, term)
+       when key in ["ArrowRight", "l", " ", "PageDown"],
+       do: handle_presenter_command(:next, term)
 
-        term.assigns.slide_index > 0 ->
-          previous_index = term.assigns.slide_index - 1
-          previous_slide = Enum.at(term.assigns.deck.slides, previous_index)
-          slide = current_slide(term.assigns)
-          direction = EasyBreezy.Transitions.direction(slide, :backward)
+  defp handle_presenter_key_event(%{"key" => key}, term) when key in ["ArrowLeft", "h", "PageUp"],
+    do: handle_presenter_command(:previous, term)
 
-          if EasyBreezy.Transitions.enabled?(
-               slide,
-               previous_slide,
-               direction,
-               term.assigns.actual_theme_mode
-             ) do
-            EasyBreezy.Transitions.start(term, previous_index, previous_slide.steps, direction)
-          else
-            term
-            |> assign(slide_index: previous_index, step: previous_slide.steps)
-            |> maybe_delete_image_overlay(slide)
-          end
+  defp handle_presenter_key_event(%{"key" => "Home"}, term),
+    do: handle_presenter_command(:home, term)
 
-        true ->
-          term
+  defp handle_presenter_key_event(%{"key" => "End"}, term),
+    do: handle_presenter_command(:end, term)
+
+  defp handle_presenter_key_event(_event, term), do: term
+
+  defp dispatch_visible_live_input(term, event) do
+    slide = visible_slide(term.assigns)
+
+    with true <- LiveSlide.live?(slide) and LiveSlide.sync?(slide),
+         id when is_binary(id) <- LiveSlide.id(slide) do
+      case dispatch_server_live_input(term, id, event) do
+        {:ok, result} -> result
+        :error -> dispatch_child_live_input(term, id, event)
       end
+    else
+      _other -> {:not_consumed, term}
     end
+  end
+
+  defp dispatch_server_live_input(%{server: server} = term, id, event)
+       when is_pid(server) and is_binary(id) do
+    if function_exported?(Breeze.Server, :dispatch_live_input, 4) do
+      case apply(Breeze.Server, :dispatch_live_input, [server, id, event, []]) do
+        {:noreply, focused, true} ->
+          {:ok, {:consumed, %{term | focused: focused}}}
+
+        {:noreply, focused, false} ->
+          {:ok, {:not_consumed, %{term | focused: focused}}}
+
+        {:stop, focused, true} ->
+          {:ok, {:consumed, %{term | focused: focused}}}
+
+        {:stop, focused, false} ->
+          {:ok, {:not_consumed, %{term | focused: focused}}}
+
+        _other ->
+          :error
+      end
+    else
+      :error
+    end
+  catch
+    :exit, _reason -> :error
+  end
+
+  defp dispatch_server_live_input(_term, _id, _event), do: :error
+
+  defp dispatch_child_live_input(term, id, event) do
+    with %{pid: pid} when is_pid(pid) <- Map.get(term.children, id),
+         true <- Process.alive?(pid) do
+      case Breeze.ChildServer.dispatch_input(pid, event) do
+        {:noreply, focused, true} ->
+          {:consumed, %{term | focused: live_focus(id, focused)}}
+
+        {:noreply, focused, false} ->
+          {:not_consumed, %{term | focused: live_focus(id, focused)}}
+
+        {:stop, focused, true} ->
+          {:consumed, %{term | focused: live_focus(id, focused)}}
+
+        {:stop, focused, false} ->
+          {:not_consumed, %{term | focused: live_focus(id, focused)}}
+      end
+    else
+      _other -> {:not_consumed, term}
+    end
+  end
+
+  defp live_focus(id, focused) when is_binary(focused), do: id <> "::" <> focused
+  defp live_focus(id, _focused), do: id
+
+  defp retreat(term) do
+    term =
+      if term.assigns.transition do
+        term
+      else
+        cond do
+          term.assigns.step > 0 ->
+            assign(term, step: term.assigns.step - 1)
+
+          term.assigns.slide_index > 0 ->
+            previous_index = term.assigns.slide_index - 1
+            previous_slide = Enum.at(term.assigns.deck.slides, previous_index)
+            slide = current_slide(term.assigns)
+            direction = EasyBreezy.Transitions.direction(slide, :backward)
+
+            if EasyBreezy.Transitions.enabled?(
+                 slide,
+                 previous_slide,
+                 direction,
+                 term.assigns.actual_theme_mode
+               ) do
+              EasyBreezy.Transitions.start(term, previous_index, previous_slide.steps, direction)
+            else
+              term
+              |> assign(slide_index: previous_index, step: previous_slide.steps)
+              |> maybe_delete_image_overlay(slide)
+            end
+
+          true ->
+            term
+        end
+      end
+
+    focus_visible_live_slide(term)
   end
 
   defp jump_to_slide(term, slide_index) do
@@ -569,6 +761,7 @@ defmodule EasyBreezy.Slideshow do
     term
     |> assign(slide_index: slide_index, step: step)
     |> assign(transition: nil)
+    |> focus_visible_live_slide()
     |> maybe_delete_image_overlay(previous_slide)
   end
 
@@ -580,6 +773,7 @@ defmodule EasyBreezy.Slideshow do
 
     term
     |> assign(slide_index: slide_index, step: step, transition: nil)
+    |> focus_visible_live_slide()
     |> maybe_delete_image_overlay(previous_slide)
   end
 
@@ -609,6 +803,30 @@ defmodule EasyBreezy.Slideshow do
   defp current_slide(%{deck: %{slides: slides}, slide_index: slide_index}) do
     Enum.at(slides, slide_index)
   end
+
+  defp visible_slide(%{
+         transition: %{to_index: slide_index},
+         deck: %{slides: slides}
+       }) do
+    Enum.at(slides, slide_index)
+  end
+
+  defp visible_slide(assigns), do: current_slide(assigns)
+
+  defp visible_synced_live_slide?(assigns) do
+    slide = visible_slide(assigns)
+    LiveSlide.live?(slide) and LiveSlide.sync?(slide)
+  end
+
+  defp visible_live_slide_id(assigns) do
+    slide = visible_slide(assigns)
+
+    if LiveSlide.live?(slide) and LiveSlide.sync?(slide) do
+      LiveSlide.id(slide)
+    end
+  end
+
+  defp focus_visible_live_slide(term), do: LiveSlide.focus(term, visible_slide(term.assigns))
 
   defp next_slide_title(assigns, slide_index) do
     case Enum.at(assigns.deck.slides, slide_index + 1) do
@@ -688,4 +906,97 @@ defmodule EasyBreezy.Slideshow do
   defp image_payload?(%{left_mode: mode}) when mode in [:image, "image"], do: true
   defp image_payload?(%{right_mode: mode}) when mode in [:image, "image"], do: true
   defp image_payload?(_payload), do: false
+
+  defp presentation_live_snapshot(term) do
+    with id when is_binary(id) <- visible_live_slide_id(term.assigns) do
+      child_live_snapshot(term, id)
+    else
+      _other -> nil
+    end
+  end
+
+  defp request_server_live_snapshot(%{server: server} = term)
+       when is_pid(server) do
+    with id when is_binary(id) <- visible_live_slide_id(term.assigns),
+         true <- function_exported?(Breeze.Server, :request_live_snapshot, 5) do
+      ref = make_ref()
+
+      apply(Breeze.Server, :request_live_snapshot, [
+        server,
+        id,
+        self(),
+        ref,
+        [compact_snapshot: true]
+      ])
+
+      :requested
+    else
+      _other -> :not_requested
+    end
+  catch
+    :exit, _reason -> :not_requested
+  end
+
+  defp request_server_live_snapshot(_term), do: :not_requested
+
+  defp normalize_live_snapshot(%{content: content} = snapshot, fallback_id)
+       when is_binary(content) do
+    %{
+      id: Map.get(snapshot, :id, fallback_id),
+      content: content,
+      width: Map.get(snapshot, :width),
+      height: Map.get(snapshot, :height)
+    }
+  end
+
+  defp normalize_live_snapshot(_snapshot, _fallback_id), do: nil
+
+  defp child_live_snapshot(term, id) do
+    with %{pid: pid} when is_pid(pid) <- Map.get(term.children, id),
+         true <- Process.alive?(pid) do
+      width = max(term.assigns.screen_width - 6, 20)
+      height = max(term.assigns.screen_height - 6, 8)
+      terminal = snapshot_terminal(term.terminal, width, height)
+
+      case Breeze.ChildServer.render_snapshot(pid,
+             focused: strip_live_focus(term.focused, id),
+             implicit_state: %{},
+             terminal: terminal,
+             theme: term.theme,
+             theme_source: term.theme_source || term.theme,
+             live_prefix: id
+           ) do
+        {:ok, _acc, box, _decorations} ->
+          %{
+            id: id,
+            content: box.content || "",
+            width: box.width || width,
+            height: box.height || height
+          }
+
+        _other ->
+          nil
+      end
+    else
+      _other -> nil
+    end
+  end
+
+  defp snapshot_terminal(%Termite.Terminal{} = terminal, width, height) do
+    %{terminal | size: %{width: width, height: height}}
+  end
+
+  defp snapshot_terminal(_terminal, width, height) do
+    %Termite.Terminal{size: %{width: width, height: height}}
+  end
+
+  defp strip_live_focus(focused, id) when is_binary(focused) and is_binary(id) do
+    cond do
+      focused == id -> nil
+      String.starts_with?(focused, id <> "::") -> String.replace_prefix(focused, id <> "::", "")
+      true -> nil
+    end
+  end
+
+  defp strip_live_focus(_focused, _id), do: nil
 end

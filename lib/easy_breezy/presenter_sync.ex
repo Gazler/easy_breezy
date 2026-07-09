@@ -63,6 +63,17 @@ defmodule EasyBreezy.PresenterSync do
     end
   end
 
+  def request_state(name, subscriber \\ self()) do
+    case whereis(name) do
+      nil ->
+        :error
+
+      pid ->
+        send(pid, {:easy_breezy_presenter_state_request, subscriber})
+        :ok
+    end
+  end
+
   def publish(subscribers, payload) do
     Enum.each(subscribers, &send(&1, {:easy_breezy_presentation_state, payload}))
   end

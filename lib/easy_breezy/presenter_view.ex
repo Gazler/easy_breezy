@@ -4,6 +4,7 @@ defmodule EasyBreezy.PresenterView do
   use Breeze.View
 
   alias EasyBreezy.Layouts.CodeSlide
+  alias EasyBreezy.LiveSlide
   alias EasyBreezy.PresenterScroll
   alias EasyBreezy.Slideshow.KittyImage
   alias Breeze.Theme
@@ -13,6 +14,17 @@ defmodule EasyBreezy.PresenterView do
   @themes [:system16, :system, :nebula, :catppuccin, :dracula, :gruvbox, :nord, :solarized_light]
   @retry_ms 1_000
   @clock_tick_ms 1_000
+  @live_snapshot_tick_ms 100
+  @live_slide_movement_keys [
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "h",
+    "j",
+    "k",
+    "l"
+  ]
 
   def mount(opts, term) do
     deck = Keyword.fetch!(opts, :deck)
@@ -35,6 +47,9 @@ defmodule EasyBreezy.PresenterView do
         screen_height: screen_height,
         presentation_screen_width: nil,
         presentation_screen_height: nil,
+        live_state: %{},
+        live_snapshot: nil,
+        live_snapshot_poll_ref: nil,
         sync_name: sync_name,
         sync_status: "connecting",
         themes: Keyword.get(opts, :themes, @themes),
@@ -48,6 +63,7 @@ defmodule EasyBreezy.PresenterView do
       |> assign_theme_colors()
       |> put_local_keybindings(scroll_keybindings())
       |> subscribe_to_presentation()
+      |> focus_current_live_slide()
 
     Process.send_after(self(), :clock_tick, @clock_tick_ms)
 
@@ -86,6 +102,10 @@ defmodule EasyBreezy.PresenterView do
     next_body_style = %{width: max(next_width - 2, 1), height: max(top_height - 2, 1)}
     next_label = next_label(next_slide, max(next_width - 2, 1))
     next_label_style = %{position: :absolute, left: 1, top: 0, width: String.length(next_label)}
+    current_live_slide? = LiveSlide.live?(slide)
+    current_live_snapshot? = live_snapshot_matches?(assigns.live_snapshot, slide)
+    current_live_placeholder? = current_live_slide? and not current_live_snapshot?
+    next_live_slide? = LiveSlide.live?(next_slide)
     footer_clock_width = 18
     footer_left_width = min(34, max(div(assigns.screen_width, 3), 22))
     footer_middle_width = max(assigns.screen_width - footer_left_width - footer_clock_width, 1)
@@ -113,12 +133,23 @@ defmodule EasyBreezy.PresenterView do
       |> assign(next_body_style: next_body_style)
       |> assign(next_label: next_label)
       |> assign(next_label_style: next_label_style)
+      |> assign(current_live_slide?: current_live_slide?)
+      |> assign(current_live_snapshot?: current_live_snapshot?)
+      |> assign(current_live_placeholder?: current_live_placeholder?)
+      |> assign(next_live_slide?: next_live_slide?)
       |> assign(notes: notes)
       |> assign(
         render_context: %{
           theme_colors: assigns.theme_colors,
           code_theme: assigns.code_theme,
-          animate_title_gradient?: false
+          animate_title_gradient?: false,
+          image_scope: "presenter-current"
+        },
+        next_render_context: %{
+          theme_colors: assigns.theme_colors,
+          code_theme: assigns.code_theme,
+          animate_title_gradient?: false,
+          image_scope: "presenter-next"
         }
       )
 
@@ -134,26 +165,45 @@ defmodule EasyBreezy.PresenterView do
       <box :if={@synced?} class="width-full height-full">
         <box class="inline width-full">
           <box style={@current_style} class="border border-stroke bg-surface overflow-hidden">
-            <.slide_body
-              slide={@slide}
-              step={@visible_step}
-              body_width={@current_body_width}
-              body_height={@current_body_height}
-              render_context={@render_context}
-            />
+            <box :if={!@current_live_slide?} class="width-full height-full">
+              <.slide_body
+                slide={@slide}
+                step={@visible_step}
+                body_width={@current_body_width}
+                body_height={@current_body_height}
+                live_state={@live_state}
+                render_context={@render_context}
+              />
+            </box>
+            <box :if={@current_live_snapshot?} class="width-full height-full overflow-hidden">
+              {Map.get(@live_snapshot, :content, "")}
+            </box>
+            <box :if={@current_live_placeholder?} class="width-full height-full">
+              <box>{" "}</box>
+              <box class="bold text-secondary">Live Slide</box>
+              <box class="text-muted">{@slide.title}</box>
+            </box>
           </box>
-          <box style={@gutter_style}>
-            {" "}
-          </box>
+          <box style={@gutter_style}>{" "}</box>
           <box style={@next_style} class="border border-stroke bg-panel">
-            <box :if={!is_nil(@next_slide)} style={@next_body_style} class="overflow-hidden">
+            <box
+              :if={!is_nil(@next_slide) and !@next_live_slide?}
+              style={@next_body_style}
+              class="overflow-hidden"
+            >
               <.slide_body
                 slide={@next_slide}
                 step={0}
                 body_width={@next_body_width}
                 body_height={@next_body_height}
-                render_context={@render_context}
+                live_state={@live_state}
+                render_context={@next_render_context}
               />
+            </box>
+            <box :if={@next_live_slide?} style={@next_body_style} class="overflow-hidden">
+              <box>{" "}</box>
+              <box class="bold text-secondary">Live Slide</box>
+              <box class="text-muted">{@next_slide.title}</box>
             </box>
             <box
               :if={@next_label != ""}
@@ -183,16 +233,53 @@ defmodule EasyBreezy.PresenterView do
     """
   end
 
-  def handle_event(_, %{"key" => key}, term) when key in [" ", "ArrowRight", "l", "PageDown"] do
-    {:noreply, send_command(term, :next)}
+  def handle_event(_, %{"key" => key}, term) when key in @live_slide_movement_keys do
+    cond do
+      current_synced_live_slide?(term.assigns) ->
+        {:noreply, forward_input(term, %{"key" => key})}
+
+      key in ["ArrowRight", "l"] ->
+        {:noreply, send_command(term, :next)}
+
+      key in ["ArrowLeft", "h"] ->
+        {:noreply, send_command(term, :previous)}
+
+      true ->
+        {:noreply, term}
+    end
   end
 
-  def handle_event(_, %{"key" => key}, term) when key in ["ArrowLeft", "h", "PageUp"] do
-    {:noreply, send_command(term, :previous)}
+  def handle_event(_, %{"key" => key}, term) when key in [" ", "PageDown"] do
+    if current_synced_live_slide?(term.assigns) do
+      {:noreply, forward_input(term, %{"key" => key})}
+    else
+      {:noreply, send_command(term, :next)}
+    end
   end
 
-  def handle_event(_, %{"key" => "Home"}, term), do: {:noreply, send_command(term, :home)}
-  def handle_event(_, %{"key" => "End"}, term), do: {:noreply, send_command(term, :end)}
+  def handle_event(_, %{"key" => "PageUp"}, term) do
+    if current_synced_live_slide?(term.assigns) do
+      {:noreply, forward_input(term, %{"key" => "PageUp"})}
+    else
+      {:noreply, send_command(term, :previous)}
+    end
+  end
+
+  def handle_event(_, %{"key" => "Home"}, term) do
+    if current_synced_live_slide?(term.assigns) do
+      {:noreply, forward_input(term, %{"key" => "Home"})}
+    else
+      {:noreply, send_command(term, :home)}
+    end
+  end
+
+  def handle_event(_, %{"key" => "End"}, term) do
+    if current_synced_live_slide?(term.assigns) do
+      {:noreply, forward_input(term, %{"key" => "End"})}
+    else
+      {:noreply, send_command(term, :end)}
+    end
+  end
 
   def handle_event(_, %{"ctrlKey" => true, "key" => key}, term) when key in ["t", "T"] do
     {:noreply, send_command(term, :cycle_theme)}
@@ -202,6 +289,14 @@ defmodule EasyBreezy.PresenterView do
 
   def handle_event(_, %{"key" => key}, term) when key in ["q", "Escape"] do
     {:stop, KittyImage.delete_overlay(term)}
+  end
+
+  def handle_event(_, %{"key" => _key} = event, term) do
+    if current_synced_live_slide?(term.assigns) do
+      {:noreply, forward_input(term, event)}
+    else
+      {:noreply, term}
+    end
   end
 
   def handle_event(_, _, term), do: {:noreply, term}
@@ -220,16 +315,32 @@ defmodule EasyBreezy.PresenterView do
     {:noreply, assign(term, elapsed_label: elapsed_label(term.assigns.started_at_ms))}
   end
 
+  def handle_info(:live_snapshot_poll, term) do
+    term = assign(term, live_snapshot_poll_ref: nil)
+
+    if current_synced_live_slide?(term.assigns) do
+      case EasyBreezy.PresenterSync.request_state(term.assigns.sync_name, self()) do
+        :ok -> {:noreply, schedule_live_snapshot_poll(term), invalidate: false}
+        :error -> {:noreply, term, invalidate: false}
+      end
+    else
+      {:noreply, term, invalidate: false}
+    end
+  end
+
   def handle_info({:easy_breezy_presentation_state, payload}, term) when is_map(payload) do
     theme_name = Map.get(payload, :theme_name, term.assigns.theme_name)
+    deck = Map.get(payload, :deck, term.assigns.deck)
+    slide_index = Map.get(payload, :slide_index, term.assigns.slide_index)
+    live_snapshot = next_live_snapshot(term.assigns.live_snapshot, payload, deck, slide_index)
 
     previous_term = term
 
     term =
       term
       |> assign(
-        deck: Map.get(payload, :deck, term.assigns.deck),
-        slide_index: Map.get(payload, :slide_index, term.assigns.slide_index),
+        deck: deck,
+        slide_index: slide_index,
         step: Map.get(payload, :step, term.assigns.step),
         presentation_screen_width: Map.get(payload, :screen_width),
         presentation_screen_height: Map.get(payload, :screen_height),
@@ -239,12 +350,15 @@ defmodule EasyBreezy.PresenterView do
         theme_name: theme_name,
         actual_theme_mode: Map.get(payload, :actual_theme_mode, term.assigns.actual_theme_mode),
         theme_status: Map.get(payload, :theme_status, term.assigns.theme_status),
+        live_snapshot: live_snapshot,
         sync_status: "connected"
       )
       |> assign_theme(theme_name)
       |> clamp_position()
       |> PresenterScroll.import(Map.get(payload, :scroll_state))
+      |> focus_current_live_slide()
       |> maybe_delete_presenter_image_overlay(previous_term)
+      |> schedule_live_snapshot_poll()
 
     {:noreply, term}
   end
@@ -267,6 +381,13 @@ defmodule EasyBreezy.PresenterView do
     term
   end
 
+  defp forward_input(term, event) do
+    send_command(
+      term,
+      {:input, Map.take(event, ["key", "ctrlKey", "altKey", "shiftKey", "metaKey"])}
+    )
+  end
+
   defp scroll_keybindings do
     Enum.map(PresenterScroll.keys(), fn key ->
       {key, fn event, term -> {:noreply, sync_scroll(term, event)} end}
@@ -276,9 +397,13 @@ defmodule EasyBreezy.PresenterView do
   defp sync_scroll(term, event) do
     scroll_event = PresenterScroll.event(event)
 
-    term
-    |> PresenterScroll.apply(scroll_event)
-    |> send_command({:scroll, scroll_event})
+    if current_synced_live_slide?(term.assigns) do
+      forward_input(term, scroll_event)
+    else
+      term
+      |> PresenterScroll.apply(scroll_event)
+      |> send_command({:scroll, scroll_event})
+    end
   end
 
   defp current_position(%{deck: %{slides: slides}, slide_index: slide_index, step: step}) do
@@ -291,38 +416,122 @@ defmodule EasyBreezy.PresenterView do
     slide_index = term.assigns.slide_index |> max(0) |> min(length(deck.slides) - 1)
     slide = Enum.at(deck.slides, slide_index)
     step = term.assigns.step |> max(0) |> min(slide.steps)
-    assign(term, slide_index: slide_index, step: step)
+
+    term
+    |> assign(slide_index: slide_index, step: step)
+    |> focus_current_live_slide()
   end
 
   defp maybe_delete_presenter_image_overlay(term, previous_term) do
-    if visible_image_slide?(previous_term.assigns) do
+    previous_images = visible_image_keys(previous_term.assigns)
+    current_images = visible_image_keys(term.assigns)
+
+    if previous_images != current_images and (previous_images != [] or current_images != []) do
       KittyImage.delete_overlay(term)
     else
       term
     end
   end
 
-  defp visible_image_slide?(assigns) do
+  defp visible_image_keys(assigns) do
     {slide, slide_index, _step} = current_position(assigns)
     next_slide = Enum.at(assigns.deck.slides, slide_index + 1)
 
-    image_slide?(slide) or image_slide?(next_slide)
+    [{:current, slide}, {:next, next_slide}]
+    |> Enum.flat_map(fn {slot, slide} ->
+      slide
+      |> image_slide_keys()
+      |> Enum.map(fn key -> {slot, key} end)
+    end)
   end
 
-  defp image_slide?(nil), do: false
-  defp image_slide?(%{id: :image}), do: true
+  defp image_slide_keys(nil), do: []
 
-  defp image_slide?(slide) do
+  defp image_slide_keys(slide) do
     slide
     |> resolve_slide_payload(80, 0)
-    |> image_payload?()
+    |> image_payload_keys()
   end
 
-  defp image_payload?(%{right_mode: :image}), do: true
-  defp image_payload?(%{right_mode: "image"}), do: true
-  defp image_payload?(%{left_mode: :image}), do: true
-  defp image_payload?(%{left_mode: "image"}), do: true
-  defp image_payload?(_payload), do: false
+  defp image_payload_keys(payload) do
+    []
+    |> maybe_add_image_key(:left, Map.get(payload, :left_mode), Map.get(payload, :left_path))
+    |> maybe_add_image_key(:right, Map.get(payload, :right_mode), Map.get(payload, :right_path))
+  end
+
+  defp maybe_add_image_key(keys, side, mode, path) when mode in [:image, "image"] do
+    [{side, path} | keys]
+  end
+
+  defp maybe_add_image_key(keys, _side, _mode, _path), do: keys
+
+  defp current_synced_live_slide?(assigns) do
+    {slide, _slide_index, _step} = current_position(assigns)
+    LiveSlide.live?(slide) and LiveSlide.sync?(slide)
+  end
+
+  defp live_snapshot_matches?(snapshot, slide) when is_map(snapshot) do
+    LiveSlide.live?(slide) and LiveSlide.sync?(slide) and
+      Map.get(snapshot, :id) == LiveSlide.id(slide)
+  end
+
+  defp live_snapshot_matches?(_snapshot, _slide), do: false
+
+  defp normalize_live_snapshot(%{id: id, content: content} = snapshot)
+       when is_binary(id) and is_binary(content) do
+    %{
+      id: id,
+      content: content,
+      width: Map.get(snapshot, :width),
+      height: Map.get(snapshot, :height)
+    }
+  end
+
+  defp normalize_live_snapshot(%{"id" => id, "content" => content} = snapshot)
+       when is_binary(id) and is_binary(content) do
+    %{
+      id: id,
+      content: content,
+      width: Map.get(snapshot, "width"),
+      height: Map.get(snapshot, "height")
+    }
+  end
+
+  defp normalize_live_snapshot(_snapshot), do: nil
+
+  defp next_live_snapshot(previous_snapshot, payload, deck, slide_index) do
+    snapshot = normalize_live_snapshot(Map.get(payload, :live_snapshot))
+    slide = Enum.at(deck.slides, slide_index)
+
+    cond do
+      live_snapshot_matches?(snapshot, slide) ->
+        snapshot
+
+      live_snapshot_matches?(previous_snapshot, slide) ->
+        previous_snapshot
+
+      true ->
+        nil
+    end
+  end
+
+  defp schedule_live_snapshot_poll(%{assigns: %{live_snapshot_poll_ref: ref}} = term)
+       when is_reference(ref),
+       do: term
+
+  defp schedule_live_snapshot_poll(term) do
+    if current_synced_live_slide?(term.assigns) do
+      ref = Process.send_after(self(), :live_snapshot_poll, @live_snapshot_tick_ms)
+      assign(term, live_snapshot_poll_ref: ref)
+    else
+      term
+    end
+  end
+
+  defp focus_current_live_slide(term) do
+    {slide, _slide_index, _step} = current_position(term.assigns)
+    LiveSlide.focus(term, slide)
+  end
 
   defp speaker_notes(slide, body_width, step) do
     payload = resolve_slide_payload(slide, body_width, step)

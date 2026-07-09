@@ -3,6 +3,21 @@ defmodule EasyBreezy.PresenterViewTest do
 
   alias EasyBreezy.{Deck, Slide}
 
+  defmodule LivePreviewView do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, count: 0)}
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-full height-full">
+        <box>Live counter</box>
+        <box>value: {@count}</box>
+      </box>
+      """
+    end
+  end
+
   defmodule RecordingTerminal do
     def write(%{owner: owner} = term, output) do
       send(owner, {:terminal_write, output})
@@ -10,7 +25,7 @@ defmodule EasyBreezy.PresenterViewTest do
     end
   end
 
-  test "cleans up kitty images when presenter state leaves an image slide" do
+  test "cleans up kitty images when the visible image set changes" do
     session =
       Breeze.Test.start!(EasyBreezy.PresenterView,
         terminal: recording_terminal(self()),
@@ -25,7 +40,15 @@ defmodule EasyBreezy.PresenterViewTest do
       {:easy_breezy_presentation_state, presentation_payload(image_deck(), 0)}
     )
 
-    refute_receive {:terminal_write, _}
+    assert_receive {:terminal_write, output}
+    assert output == EasyBreezy.Slideshow.KittyImage.delete_command()
+
+    Breeze.Test.info(
+      session,
+      {:easy_breezy_presentation_state, presentation_payload(image_deck(), 0)}
+    )
+
+    refute_receive {:terminal_write, _}, 50
 
     Breeze.Test.info(
       session,
@@ -62,6 +85,120 @@ defmodule EasyBreezy.PresenterViewTest do
 
     assert plain =~
              "┌────────────────────────────────────────────────────────────────────────────────────┐ ┌Next: Why Breeze"
+  end
+
+  test "next preview shows a placeholder for live slides" do
+    deck = live_preview_deck()
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    payload =
+      deck
+      |> presentation_payload(0)
+      |> Map.put(:live_state, %{
+        "breeze-slide-live-demo" => %{assigns: %{count: 7}}
+      })
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert plain =~ "Next: Live Demo"
+    assert plain =~ "Live Slide"
+    assert plain =~ "Live Demo"
+    refute plain =~ "value: 7"
+    refute plain =~ "Live counter"
+  end
+
+  test "next preview activates kitty image overlays sized to the preview box" do
+    path = Path.join(System.tmp_dir!(), "easy_breezy_presenter_preview.img")
+    File.write!(path, "preview-image")
+    deck = text_to_image_deck(path)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {120, 30},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+
+    rendered = Breeze.Test.render!(session)
+    assert rendered =~ "Next: Image"
+
+    assert {_module, state} = Breeze.Test.metadata(session).implicit_state["slide-image"]
+    assert state.active?
+    assert state.scope == "presenter-next:right"
+
+    {:ok, _acc, _box, decorations} = Breeze.ChildServer.render_snapshot(session.pid, [])
+    decoration = Enum.find(decorations, &(&1.id == "slide-image"))
+
+    assert {:ok, _box, overlays: [overlay]} =
+             decoration.mod.animate(:root, decoration.box, decoration.flags, decoration.state, %{
+               phase: :async,
+               frame: 0,
+               layout: decoration.layout
+             })
+
+    assert overlay.width == decoration.layout.width - 2
+    assert overlay.height == decoration.layout.height - 2
+    assert overlay.content =~ "c=#{overlay.width},r=#{overlay.height}"
+  end
+
+  test "next image preview keeps its image slot layout after a current live slide" do
+    path = Path.join(System.tmp_dir!(), "easy_breezy_presenter_live_preview.img")
+    File.write!(path, "preview-image")
+    deck = live_to_image_deck(path)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {204, 50},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    payload =
+      deck
+      |> presentation_payload(0)
+      |> Map.merge(%{screen_width: 84, screen_height: 24})
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+
+    {:ok, _acc, _box, decorations} =
+      Breeze.ChildServer.render_snapshot(session.pid, terminal: session.terminal)
+
+    decoration = Enum.find(decorations, &(&1.id == "slide-image"))
+
+    assert %Breeze.Viewport{left: left, top: top, width: width, height: height} =
+             decoration.layout
+
+    assert left > 100
+    assert top in 1..10
+    assert width > 20
+    assert height > 5
+
+    assert {:ok, _box, overlays: [overlay]} =
+             decoration.mod.animate(:root, decoration.box, decoration.flags, decoration.state, %{
+               phase: :async,
+               frame: 0,
+               layout: decoration.layout
+             })
+
+    assert overlay.x == left + 1
+    assert overlay.y == top + 1
+    assert overlay.height == height - 2
   end
 
   test "arrow-key scrolling updates presenter scroll state and sends a presentation command" do
@@ -170,6 +307,46 @@ defmodule EasyBreezy.PresenterViewTest do
     }
   end
 
+  defp text_to_image_deck(path) do
+    %Deck{
+      title: "Presenter Test",
+      slides: [
+        %Slide{id: :intro, title: "Intro", layout: :bullets, payload: text_payload("Intro")},
+        %Slide{
+          id: :image,
+          title: "Image",
+          layout: :two_column,
+          payload: Map.merge(text_payload("Image"), %{right_mode: :image, right_path: path})
+        }
+      ]
+    }
+  end
+
+  defp live_to_image_deck(path) do
+    %Deck{
+      title: "Presenter Test",
+      slides: [
+        %Slide{
+          id: :live_demo,
+          title: "Live Demo",
+          layout: :breeze,
+          payload: LivePreviewView
+        },
+        %Slide{
+          id: :image,
+          title: "Image",
+          layout: :two_column,
+          payload:
+            Map.merge(text_payload("Image"), %{
+              right_title: "Image slot",
+              right_mode: :image,
+              right_path: path
+            })
+        }
+      ]
+    }
+  end
+
   defp preview_deck do
     %Deck{
       title: "Presenter Test",
@@ -180,6 +357,21 @@ defmodule EasyBreezy.PresenterViewTest do
           title: "Why Breeze",
           layout: :bullets,
           payload: text_payload("Why Breeze")
+        }
+      ]
+    }
+  end
+
+  defp live_preview_deck do
+    %Deck{
+      title: "Presenter Test",
+      slides: [
+        %Slide{id: :intro, title: "Intro", layout: :bullets, payload: text_payload("Intro")},
+        %Slide{
+          id: :live_demo,
+          title: "Live Demo",
+          layout: :breeze,
+          payload: LivePreviewView
         }
       ]
     }

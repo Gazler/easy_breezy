@@ -15,6 +15,8 @@ defmodule EasyBreezy do
       [
         view: view_for_presenter_mode(presenter_mode),
         start_opts: start_opts,
+        inspector: true,
+        mouse: true,
         reload: reload_opts,
         hide_cursor: Keyword.get(opts, :hide_cursor, true),
         global_keybindings:
