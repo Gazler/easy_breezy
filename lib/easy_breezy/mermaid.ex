@@ -185,7 +185,7 @@ defmodule EasyBreezy.Mermaid do
         {node_lines, positions} = render_td_layer(ids, graph, width, ansi_restore)
         %{lines: node_lines, positions: positions}
       end)
-      |> align_single_node_layers(graph)
+      |> align_td_layers(graph)
 
     rendered_layers
     |> Enum.with_index()
@@ -252,24 +252,24 @@ defmodule EasyBreezy.Mermaid do
     {lines, positions}
   end
 
-  defp align_single_node_layers(rendered_layers, graph) do
+  defp align_td_layers(rendered_layers, graph) do
     rendered_layers
     |> Enum.reduce([], fn layer, aligned_layers ->
       case List.last(aligned_layers) do
         nil -> [layer]
-        previous -> aligned_layers ++ [align_single_node_layer(previous, layer, graph)]
+        previous -> aligned_layers ++ [align_td_layer(previous, layer, graph)]
       end
     end)
   end
 
-  defp align_single_node_layer(previous, current, graph) do
+  defp align_td_layer(previous, current, graph) do
     incoming_edges = td_edges(previous.positions, current.positions, graph)
 
     with true <- map_size(previous.positions) == 1,
-         true <- map_size(current.positions) == 1,
-         [edge] <- incoming_edges,
-         %{center: source_center} <- Map.get(previous.positions, edge.from),
-         %{center: target_center} <- Map.get(current.positions, edge.to) do
+         [_edge | _] <- incoming_edges,
+         source_center <- single_position_center(previous.positions),
+         {target_center, _distance} <-
+           closest_target_center(incoming_edges, current.positions, source_center) do
       shift = source_center - target_center
 
       if shift != 0 and abs(shift) <= 2 and can_shift_layer?(current, shift) do
@@ -280,6 +280,22 @@ defmodule EasyBreezy.Mermaid do
     else
       _ -> current
     end
+  end
+
+  defp single_position_center(positions) do
+    positions
+    |> Map.values()
+    |> List.first()
+    |> Map.fetch!(:center)
+  end
+
+  defp closest_target_center(edges, positions, source_center) do
+    edges
+    |> Enum.map(fn edge ->
+      target_center = positions[edge.to].center
+      {target_center, abs(source_center - target_center)}
+    end)
+    |> Enum.min_by(fn {_target_center, distance} -> distance end)
   end
 
   defp can_shift_layer?(%{positions: positions}, shift) when shift < 0 do
@@ -427,23 +443,11 @@ defmodule EasyBreezy.Mermaid do
 
   defp connector_centers(source_center, target_center), do: {source_center, target_center}
 
-  defp routed_connector_centers(edge, edges, previous, current) do
+  defp routed_connector_centers(edge, _edges, previous, current) do
     source_center = previous[edge.from].center
-
-    source_center =
-      Enum.find(
-        for(candidate <- edges, candidate.from == edge.from, do: current[candidate.to].center),
-        source_center,
-        &(abs(&1 - source_center) <= 2)
-      )
-
     target_center = current[edge.to].center
 
-    if abs(source_center - target_center) <= 2 do
-      {source_center, source_center}
-    else
-      {source_center, target_center}
-    end
+    {source_center, target_center}
   end
 
   defp child_join_char(edge, edges, current) do

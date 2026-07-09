@@ -43,9 +43,16 @@ defmodule EasyBreezy.Components.Mermaid do
     end
   end
 
-  defp ansi_restore(%{secondary: {red, green, blue}, panel: {br, bg, bb}}) do
-    "\e[38;2;#{red};#{green};#{blue}m\e[48;2;#{br};#{bg};#{bb}m"
+  defp ansi_restore(%{secondary: {red, green, blue}}) do
+    "\e[38;2;#{red};#{green};#{blue}m"
   end
 
+  defp ansi_restore(%{secondary: color}) when is_integer(color),
+    do: "\e[#{ansi_foreground(color)}m"
+
   defp ansi_restore(_theme_colors), do: IO.ANSI.reset()
+
+  defp ansi_foreground(color) when color in 0..7, do: 30 + color
+  defp ansi_foreground(color) when color in 8..15, do: 90 + color - 8
+  defp ansi_foreground(color), do: "38;5;#{color}"
 end

@@ -2,6 +2,7 @@ defmodule EasyBreezy.MermaidTest do
   use ExUnit.Case, async: true
 
   alias EasyBreezy.{Deck, Slide}
+  alias EasyBreezy.Components.Mermaid, as: MermaidComponent
   alias EasyBreezy.Deck.Markdown
   alias EasyBreezy.Mermaid
 
@@ -96,6 +97,38 @@ defmodule EasyBreezy.MermaidTest do
     assert first_left == third_left
   end
 
+  test "aligns routed branch junctions with the parent node" do
+    source = """
+    flowchart TD
+      breeze --> back_breeze
+      back_breeze --> termite
+      termite --> otp
+      termite --> kino
+      termite --> other
+    """
+
+    lines = source |> render_ascii() |> String.split("\n")
+
+    parent_column =
+      lines
+      |> line_containing("└────┬────┘")
+      |> column_of("┬")
+
+    branch_column =
+      lines
+      |> line_containing("┼")
+      |> column_of("┼")
+
+    middle_child_column =
+      lines
+      |> line_containing("┌──▼───┐")
+      |> columns_of("▼")
+      |> Enum.at(1)
+
+    assert branch_column == parent_column
+    assert middle_child_column == parent_column
+  end
+
   test "parses simple class color definitions" do
     source = """
     graph LR
@@ -112,6 +145,26 @@ defmodule EasyBreezy.MermaidTest do
 
     assert {:ok, lines} = Mermaid.render(source, 80, 20, truncate?: false, ansi_restore: "<r>")
     assert Enum.join(lines, "\n") =~ "\e[38;2;255;0;255mColorText<r>"
+  end
+
+  test "component restores class colors without painting line backgrounds" do
+    source = """
+    flowchart TD
+      classDef otpcolor color:#00ff66
+      termite --> otp:::otpcolor
+      termite --> kino
+      termite --> other
+    """
+
+    {_class, lines} =
+      MermaidComponent.render_lines(source, 80, 20, %{
+        theme_colors: %{secondary: {102, 217, 239}, panel: {31, 70, 98}}
+      })
+
+    otp_line = Enum.find(lines, &String.contains?(&1, "otp"))
+
+    assert otp_line =~ "\e[38;2;0;255;102motp\e[38;2;102;217;239m"
+    refute otp_line =~ "\e[48;"
   end
 
   test "mermaid component stays clipped inside a two-column slide" do
@@ -228,6 +281,20 @@ defmodule EasyBreezy.MermaidTest do
   defp ascii_snapshot(lines), do: Enum.join(lines, "\n")
 
   defp line_containing(lines, content), do: Enum.find(lines, &String.contains?(&1, content))
+
+  defp column_of(line, char) do
+    line
+    |> columns_of(char)
+    |> List.first()
+  end
+
+  defp columns_of(line, char) do
+    line
+    |> String.graphemes()
+    |> Enum.with_index()
+    |> Enum.filter(fn {grapheme, _index} -> grapheme == char end)
+    |> Enum.map(fn {_grapheme, index} -> index end)
+  end
 
   defp leading_spaces(line) do
     ~r/^ */
