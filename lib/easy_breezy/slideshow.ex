@@ -2,6 +2,7 @@ defmodule EasyBreezy.Slideshow do
   use Breeze.View
 
   alias EasyBreezy.Layouts.CodeSlide
+  alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
   alias EasyBreezy.PresenterScroll
   import Breeze.Blocks
@@ -566,6 +567,7 @@ defmodule EasyBreezy.Slideshow do
       screen_height: assigns.screen_height,
       presenter?: assigns.presenter?,
       started_at_ms: assigns.started_at_ms,
+      elapsed_ms: ElapsedTime.elapsed_ms(assigns.started_at_ms),
       theme_name: assigns.theme_name,
       actual_theme_mode: assigns.actual_theme_mode,
       theme_status: assigns.theme_status,

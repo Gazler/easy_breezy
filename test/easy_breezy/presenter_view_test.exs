@@ -149,6 +149,34 @@ defmodule EasyBreezy.PresenterViewTest do
     refute plain =~ "No notes for this slide."
   end
 
+  test "sync payload elapsed time uses the local presenter clock" do
+    deck = text_deck()
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    payload =
+      deck
+      |> presentation_payload(0)
+      |> Map.merge(%{
+        started_at_ms: System.monotonic_time(:millisecond) + 60_000,
+        elapsed_ms: 125_000
+      })
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert plain =~ "Elapsed 02:05"
+    refute plain =~ "0-"
+  end
+
   test "next preview activates kitty image overlays sized to the preview box" do
     path = Path.join(System.tmp_dir!(), "easy_breezy_presenter_preview.img")
     File.write!(path, "preview-image")

@@ -4,6 +4,7 @@ defmodule EasyBreezy.PresenterView do
   use Breeze.View
 
   alias EasyBreezy.Layouts.CodeSlide
+  alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
   alias EasyBreezy.PresenterScroll
   alias EasyBreezy.Slideshow.KittyImage
@@ -34,6 +35,7 @@ defmodule EasyBreezy.PresenterView do
 
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
     {theme_name, theme} = resolve_theme(Keyword.get(opts, :theme, :nebula))
+    started_at_ms = System.monotonic_time(:millisecond)
 
     term =
       term
@@ -53,8 +55,8 @@ defmodule EasyBreezy.PresenterView do
         sync_name: sync_name,
         sync_status: "connecting",
         themes: Keyword.get(opts, :themes, @themes),
-        started_at_ms: System.monotonic_time(:millisecond),
-        elapsed_label: elapsed_label(System.monotonic_time(:millisecond)),
+        started_at_ms: started_at_ms,
+        elapsed_label: ElapsedTime.label(started_at_ms),
         theme_name: theme_name,
         actual_theme_mode: term.theme.mode,
         theme_status: Theme.probe_status(term.theme) || :ready
@@ -312,7 +314,7 @@ defmodule EasyBreezy.PresenterView do
 
   def handle_info(:clock_tick, term) do
     Process.send_after(self(), :clock_tick, @clock_tick_ms)
-    {:noreply, assign(term, elapsed_label: elapsed_label(term.assigns.started_at_ms))}
+    {:noreply, assign(term, elapsed_label: ElapsedTime.label(term.assigns.started_at_ms))}
   end
 
   def handle_info(:live_snapshot_poll, term) do
@@ -333,6 +335,7 @@ defmodule EasyBreezy.PresenterView do
     deck = Map.get(payload, :deck, term.assigns.deck)
     slide_index = Map.get(payload, :slide_index, term.assigns.slide_index)
     live_snapshot = next_live_snapshot(term.assigns.live_snapshot, payload, deck, slide_index)
+    started_at_ms = presentation_started_at_ms(payload, term.assigns.started_at_ms)
 
     previous_term = term
 
@@ -344,9 +347,8 @@ defmodule EasyBreezy.PresenterView do
         step: Map.get(payload, :step, term.assigns.step),
         presentation_screen_width: Map.get(payload, :screen_width),
         presentation_screen_height: Map.get(payload, :screen_height),
-        started_at_ms: Map.get(payload, :started_at_ms, term.assigns.started_at_ms),
-        elapsed_label:
-          elapsed_label(Map.get(payload, :started_at_ms, term.assigns.started_at_ms)),
+        started_at_ms: started_at_ms,
+        elapsed_label: ElapsedTime.label(started_at_ms),
         theme_name: theme_name,
         actual_theme_mode: Map.get(payload, :actual_theme_mode, term.assigns.actual_theme_mode),
         theme_status: Map.get(payload, :theme_status, term.assigns.theme_status),
@@ -553,15 +555,15 @@ defmodule EasyBreezy.PresenterView do
 
   defp normalize_notes(note), do: [to_string(note)]
 
-  defp elapsed_label(started_at_ms) do
-    total_seconds = div(System.monotonic_time(:millisecond) - started_at_ms, 1_000)
-    minutes = div(total_seconds, 60)
-    seconds = rem(total_seconds, 60)
-    "Elapsed #{pad2(minutes)}:#{pad2(seconds)}"
-  end
+  defp presentation_started_at_ms(payload, fallback) do
+    case Map.get(payload, :elapsed_ms) do
+      elapsed_ms when is_integer(elapsed_ms) ->
+        ElapsedTime.started_at_ms_from_elapsed(elapsed_ms)
 
-  defp pad2(int) when int < 10, do: "0#{int}"
-  defp pad2(int), do: Integer.to_string(int)
+      _elapsed_ms ->
+        Map.get(payload, :started_at_ms, fallback)
+    end
+  end
 
   defp resolve_slide_payload(%{payload: payload}, body_width, step) when is_function(payload, 2),
     do: payload.(body_width, step)

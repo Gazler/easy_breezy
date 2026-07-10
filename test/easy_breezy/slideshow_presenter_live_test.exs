@@ -79,6 +79,8 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
     assert payload.live_snapshot.id == "breeze-slide-counter"
     assert payload.live_snapshot.width == 74
     assert payload.live_snapshot.height == 18
+    assert is_integer(payload.elapsed_ms)
+    assert payload.elapsed_ms >= 0
   end
 
   test "presenter renders the presentation live snapshot and forwards regular input" do
