@@ -26,6 +26,45 @@ defmodule EasyBreezy.PresenterViewTest do
     end
   end
 
+  test "escape does not close the presenter" do
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: text_deck(), theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert {:noreply, _focused, false} = Breeze.Test.input(session, "Escape")
+    assert Process.alive?(session.pid)
+  end
+
+  test "resubscribes when a reloaded presentation replaces its root process" do
+    sync_name = {:easy_breezy_reload_test, System.unique_integer([:positive])}
+    first = start_sync_target(sync_name, self())
+    assert_receive {:sync_target_ready, ^first}, 1_000
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: text_deck(), theme: :nebula, sync_name: sync_name]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert_receive {:sync_target_subscribed, ^first, presenter_pid}
+    assert presenter_pid == session.pid
+
+    Process.exit(first, :kill)
+    second = start_sync_target(sync_name, self())
+    assert_receive {:sync_target_ready, ^second}, 1_000
+
+    assert_receive {:sync_target_subscribed, ^second, ^presenter_pid}, 1_000
+    send(second, :stop)
+  end
+
   test "cleans up kitty images when the visible image set changes" do
     session =
       Breeze.Test.start!(EasyBreezy.PresenterView,
@@ -493,5 +532,27 @@ defmodule EasyBreezy.PresenterViewTest do
   defp scroll_offset(session, id) do
     {Breeze.Implicit.Scroll, state} = Breeze.Test.metadata(session).implicit_state[id]
     state.offset_y
+  end
+
+  defp start_sync_target(sync_name, owner) do
+    spawn(fn ->
+      EasyBreezy.PresenterSync.register(sync_name)
+      send(owner, {:sync_target_ready, self()})
+      sync_target_loop(owner)
+    end)
+  end
+
+  defp sync_target_loop(owner) do
+    receive do
+      {:easy_breezy_presenter_subscribe, presenter_pid} ->
+        send(owner, {:sync_target_subscribed, self(), presenter_pid})
+        sync_target_loop(owner)
+
+      :stop ->
+        :ok
+
+      _message ->
+        sync_target_loop(owner)
+    end
   end
 end

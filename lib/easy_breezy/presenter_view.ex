@@ -7,13 +7,17 @@ defmodule EasyBreezy.PresenterView do
   alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
   alias EasyBreezy.PresenterScroll
+  alias EasyBreezy.SourceEditor
   alias EasyBreezy.Slideshow.KittyImage
   alias Breeze.Theme
 
+  import Breeze.Blocks
   import EasyBreezy.Layouts
+  import EasyBreezy.Layouts.SourceEditorView
 
   @themes [:system16, :system, :nebula, :catppuccin, :dracula, :gruvbox, :nord, :solarized_light]
   @retry_ms 1_000
+  @resubscribe_ms 50
   @clock_tick_ms 1_000
   @live_snapshot_tick_ms 100
   @live_slide_movement_keys [
@@ -52,11 +56,14 @@ defmodule EasyBreezy.PresenterView do
         live_state: %{},
         live_snapshot: nil,
         live_snapshot_poll_ref: nil,
+        presentation_monitor_ref: nil,
+        presentation_pid: nil,
         sync_name: sync_name,
         sync_status: "connecting",
         themes: Keyword.get(opts, :themes, @themes),
         started_at_ms: started_at_ms,
         elapsed_label: ElapsedTime.label(started_at_ms),
+        source_editor: nil,
         source_mode?: false,
         theme_name: theme_name,
         actual_theme_mode: term.theme.mode,
@@ -137,6 +144,7 @@ defmodule EasyBreezy.PresenterView do
       |> assign(next_label: next_label)
       |> assign(next_label_style: next_label_style)
       |> assign(current_source?: assigns.source_mode?)
+      |> assign(current_editing?: !is_nil(assigns.source_editor))
       |> assign(current_live_slide?: current_live_slide?)
       |> assign(current_live_snapshot?: current_live_snapshot?)
       |> assign(current_live_placeholder?: current_live_placeholder?)
@@ -169,7 +177,16 @@ defmodule EasyBreezy.PresenterView do
       <box :if={@synced?} class="width-full height-full">
         <box class="inline width-full">
           <box style={@current_style} class="border border-stroke bg-surface overflow-hidden">
-            <box :if={@current_source?} class="width-full height-full">
+            <box :if={@current_source? && @current_editing?} class="width-full height-full">
+              <.source_editor_view
+                title={"#{@slide.title} source"}
+                editor={@source_editor}
+                body_width={@current_body_width}
+                body_height={@current_body_height}
+                render_context={@render_context}
+              />
+            </box>
+            <box :if={@current_source? && !@current_editing?} class="width-full height-full">
               <.slide_source
                 slide={@slide}
                 body_width={@current_body_width}
@@ -244,8 +261,21 @@ defmodule EasyBreezy.PresenterView do
           <box class="text-right bg-panel text" style={@footer_clock_style}>{@elapsed_label}</box>
         </box>
       </box>
+      <.flash_group flash={@breeze.flash} width={42}/>
     </box>
     """
+  end
+
+  def handle_event(
+        _,
+        %{"key" => _key} = event,
+        %{assigns: %{source_editor: %SourceEditor{}}} = term
+      ) do
+    {:noreply, forward_input(term, event)}
+  end
+
+  def handle_event(_, %{"key" => "e"}, %{assigns: %{source_mode?: true}} = term) do
+    {:noreply, send_command(term, :edit_source)}
   end
 
   def handle_event(_, %{"key" => key}, term) when key in @live_slide_movement_keys do
@@ -305,7 +335,7 @@ defmodule EasyBreezy.PresenterView do
   def handle_event(_, %{"key" => "i"}, term),
     do: {:noreply, send_command(term, :toggle_source_mode)}
 
-  def handle_event(_, %{"key" => key}, term) when key in ["q", "Escape"] do
+  def handle_event(_, %{"key" => "q"}, term) do
     {:stop, KittyImage.delete_overlay(term)}
   end
 
@@ -326,6 +356,20 @@ defmodule EasyBreezy.PresenterView do
 
   def handle_info(:presenter_sync_retry, term) do
     {:noreply, subscribe_to_presentation(term)}
+  end
+
+  def handle_info(
+        {:DOWN, ref, :process, pid, _reason},
+        %{assigns: %{presentation_monitor_ref: ref, presentation_pid: pid}} = term
+      ) do
+    Process.send_after(self(), :presenter_sync_retry, @resubscribe_ms)
+
+    {:noreply,
+     assign(term,
+       presentation_monitor_ref: nil,
+       presentation_pid: nil,
+       sync_status: "connecting"
+     )}
   end
 
   def handle_info(:clock_tick, term) do
@@ -350,6 +394,11 @@ defmodule EasyBreezy.PresenterView do
     theme_name = Map.get(payload, :theme_name, term.assigns.theme_name)
     deck = Map.get(payload, :deck, term.assigns.deck)
     slide_index = Map.get(payload, :slide_index, term.assigns.slide_index)
+    source_editor = Map.get(payload, :source_editor)
+
+    source_saved? =
+      source_saved?(term.assigns.deck, term.assigns.source_editor, deck, source_editor)
+
     live_snapshot = next_live_snapshot(term.assigns.live_snapshot, payload, deck, slide_index)
     started_at_ms = presentation_started_at_ms(payload, term.assigns.started_at_ms)
 
@@ -365,6 +414,7 @@ defmodule EasyBreezy.PresenterView do
         presentation_screen_height: Map.get(payload, :screen_height),
         started_at_ms: started_at_ms,
         elapsed_label: ElapsedTime.label(started_at_ms),
+        source_editor: source_editor,
         source_mode?: Map.get(payload, :source_mode?, term.assigns.source_mode?),
         theme_name: theme_name,
         actual_theme_mode: Map.get(payload, :actual_theme_mode, term.assigns.actual_theme_mode),
@@ -378,6 +428,7 @@ defmodule EasyBreezy.PresenterView do
       |> focus_current_live_slide()
       |> maybe_delete_presenter_image_overlay(previous_term)
       |> schedule_live_snapshot_poll()
+      |> maybe_put_source_saved_flash(source_saved?, deck)
 
     {:noreply, term}
   end
@@ -386,13 +437,33 @@ defmodule EasyBreezy.PresenterView do
 
   defp subscribe_to_presentation(term) do
     case EasyBreezy.PresenterSync.subscribe(term.assigns.sync_name) do
-      {:ok, _pid} ->
-        assign(term, sync_status: "connected")
+      {:ok, pid} ->
+        term
+        |> monitor_presentation(pid)
+        |> assign(sync_status: "connected")
 
       :error ->
         Process.send_after(self(), :presenter_sync_retry, @retry_ms)
         assign(term, sync_status: "connecting")
     end
+  end
+
+  defp monitor_presentation(
+         %{assigns: %{presentation_pid: pid, presentation_monitor_ref: ref}} = term,
+         pid
+       )
+       when is_pid(pid) and is_reference(ref),
+       do: term
+
+  defp monitor_presentation(term, pid) when is_pid(pid) do
+    if is_reference(term.assigns.presentation_monitor_ref) do
+      Process.demonitor(term.assigns.presentation_monitor_ref, [:flush])
+    end
+
+    assign(term,
+      presentation_pid: pid,
+      presentation_monitor_ref: Process.monitor(pid)
+    )
   end
 
   defp send_command(term, command) do
@@ -416,12 +487,17 @@ defmodule EasyBreezy.PresenterView do
   defp sync_scroll(term, event) do
     scroll_event = PresenterScroll.event(event)
 
-    if current_synced_live_slide?(term.assigns) do
-      forward_input(term, scroll_event)
-    else
-      term
-      |> PresenterScroll.apply(scroll_event)
-      |> send_command({:scroll, scroll_event})
+    cond do
+      match?(%SourceEditor{}, term.assigns.source_editor) ->
+        forward_input(term, scroll_event)
+
+      current_synced_live_slide?(term.assigns) ->
+        forward_input(term, scroll_event)
+
+      true ->
+        term
+        |> PresenterScroll.apply(scroll_event)
+        |> send_command({:scroll, scroll_event})
     end
   end
 
@@ -587,6 +663,21 @@ defmodule EasyBreezy.PresenterView do
         Map.get(payload, :started_at_ms, fallback)
     end
   end
+
+  defp source_saved?(previous_deck, %SourceEditor{dirty?: true}, deck, source_editor) do
+    Map.get(previous_deck, :source) != Map.get(deck, :source) and
+      (is_nil(source_editor) or not source_editor.dirty?)
+  end
+
+  defp source_saved?(_previous_deck, _previous_editor, _deck, _source_editor), do: false
+
+  defp maybe_put_source_saved_flash(term, true, %{source_path: path}) when is_binary(path),
+    do: put_flash(term, :success, "Slide source written", id: "source-written", duration: 3_000)
+
+  defp maybe_put_source_saved_flash(term, true, _deck),
+    do: put_flash(term, :success, "Updated in memory", id: "source-written", duration: 3_000)
+
+  defp maybe_put_source_saved_flash(term, false, _deck), do: term
 
   defp resolve_slide_payload(%{payload: payload}, body_width, step) when is_function(payload, 2),
     do: payload.(body_width, step)

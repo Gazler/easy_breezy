@@ -19,8 +19,7 @@ defmodule EasyBreezy do
         mouse: true,
         reload: reload_opts,
         hide_cursor: Keyword.get(opts, :hide_cursor, true),
-        global_keybindings:
-          Keyword.get(opts, :global_keybindings, [{"q", fn _event, term -> {:stop, term} end}])
+        global_keybindings: Keyword.get(opts, :global_keybindings, [])
       ],
       keep_alive: Keyword.get(opts, :keep_alive, :infinity)
     )
@@ -48,6 +47,8 @@ defmodule EasyBreezy do
       :sync_name,
       :presenter_sync_node,
       :sync_node,
+      :source_editor,
+      :source_save_notice,
       :source_mode?,
       :themes
     ])
@@ -188,6 +189,8 @@ defmodule EasyBreezy do
     |> maybe_put_assign(assigns, :slide_index)
     |> maybe_put_assign(assigns, :step)
     |> maybe_put_assign(assigns, :started_at_ms)
+    |> maybe_put_assign(assigns, :source_editor)
+    |> maybe_put_assign(assigns, :source_save_notice)
     |> maybe_put_assign(assigns, :source_mode?)
     |> maybe_put_presenter(assigns)
     |> maybe_put_theme(assigns)

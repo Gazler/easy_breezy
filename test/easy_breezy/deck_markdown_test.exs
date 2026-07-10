@@ -149,6 +149,39 @@ defmodule EasyBreezy.DeckMarkdownTest do
              """)
   end
 
+  test "tracks slide source byte ranges independently of duplicate content" do
+    assert %Deck{
+             source: "# Same\n---\n# Same",
+             slides: [
+               %Slide{source: "# Same", source_range: {0, 6}},
+               %Slide{source: "# Same", source_range: {11, 6}}
+             ]
+           } = Markdown.parse!("# Same\n---\n# Same")
+  end
+
+  test "tracks source ranges across blank lines around frontmatter" do
+    source =
+      "---\nlayout: bullets\n---\n\n- One\n\n---\nlayout: markdown\n---\n\n# Two"
+
+    deck = Markdown.parse!(source)
+
+    assert [%Slide{source_range: {start, length}}, %Slide{source_range: {_start, _length}}] =
+             deck.slides
+
+    assert binary_part(source, start, length) == "---\nlayout: bullets\n---\n\n- One"
+  end
+
+  test "loads the absolute source path for editable decks" do
+    path =
+      Path.join(System.tmp_dir!(), "easy-breezy-deck-#{System.unique_integer([:positive])}.md")
+
+    File.write!(path, "# Editable")
+    on_exit(fn -> File.rm(path) end)
+
+    assert %Deck{source_path: source_path, source: "# Editable"} = Markdown.load!(path)
+    assert source_path == Path.expand(path)
+  end
+
   test "preserves markdown before slide separators" do
     assert %Deck{
              slides: [

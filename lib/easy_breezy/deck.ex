@@ -1,3 +1,3 @@
 defmodule EasyBreezy.Deck do
-  defstruct [:title, :slides]
+  defstruct [:title, :slides, :source, :source_path]
 end

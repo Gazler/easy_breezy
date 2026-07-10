@@ -108,6 +108,14 @@ defmodule EasyBreezy.SlideshowTest do
     assert Breeze.Test.render!(session) =~ "space advance"
   end
 
+  test "escape does not close the slideshow" do
+    session = start_session()
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert {:noreply, _focused, false} = Breeze.Test.input(session, "Escape")
+    assert Process.alive?(session.pid)
+  end
+
   test "i toggles the current slide markdown source" do
     deck =
       EasyBreezy.Deck.Markdown.parse!("""
@@ -141,6 +149,110 @@ defmodule EasyBreezy.SlideshowTest do
 
     assert plain =~ "• Rendered bullet"
     refute plain =~ "layout: bullets"
+  end
+
+  test "e opens a modal editor in source mode and :w applies in-memory changes" do
+    session = start_session(deck: EasyBreezy.Deck.Markdown.parse!("# Old"))
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    input_keys(session, ["i", "e"])
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+    assert plain =~ "Vim-like editor"
+    assert plain =~ "NORMAL"
+
+    input_keys(session, ["$", "a", " updated", "Escape", ":", "w", "Enter"])
+
+    metadata = Breeze.Test.metadata(session)
+    assert metadata.assigns.deck.source == "# Old updated"
+    assert hd(metadata.assigns.deck.slides).title == "Old updated"
+    assert metadata.assigns.source_editor.dirty? == false
+
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Updated in memory"
+  end
+
+  test "restores a save flash after the slideshow reloads" do
+    session =
+      start_session(start_opts: [source_save_notice: %{id: 1, message: "Slide source written"}])
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Slide source written"
+    refute Map.has_key?(Breeze.Test.metadata(session).assigns, :source_save_notice)
+  end
+
+  test "carries a save notice through refreshed server options" do
+    notice = %{id: 1, message: "Slide source written"}
+
+    assert [start_opts: start_opts] =
+             EasyBreezy.refresh_server_opts(
+               [deck: fn -> deck() end],
+               %{metadata: %{assigns: %{source_save_notice: notice}}}
+             )
+
+    assert Keyword.fetch!(start_opts, :source_save_notice) == notice
+  end
+
+  test ":q leaves the editor and returns to the rendered slide" do
+    session = start_session(deck: EasyBreezy.Deck.Markdown.parse!("# Rendered"))
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    input_keys(session, ["i", "e", ":", "q", "Enter"])
+
+    metadata = Breeze.Test.metadata(session)
+    assert metadata.assigns.source_editor == nil
+    assert metadata.assigns.source_mode? == false
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+    assert plain =~ "# Rendered"
+    refute plain =~ "Rendered source"
+    refute plain =~ "Vim-like editor"
+  end
+
+  test ":w writes a file-backed deck and :wq closes the editor" do
+    path =
+      Path.join(System.tmp_dir!(), "easy-breezy-edit-#{System.unique_integer([:positive])}.md")
+
+    File.write!(path, "# Old")
+    on_exit(fn -> File.rm(path) end)
+
+    session = start_session(deck: EasyBreezy.Deck.Markdown.load!(path))
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    input_keys(session, ["i", "e", "d", "d", "i", "# New", "Escape", ":", "wq", "Enter"])
+
+    assert File.read!(path) == "# New"
+
+    metadata = Breeze.Test.metadata(session)
+    assert hd(metadata.assigns.deck.slides).title == "New"
+    assert metadata.assigns.source_editor == nil
+    assert metadata.assigns.source_mode? == false
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+    assert plain =~ "New"
+    refute plain =~ "New source"
+    assert plain =~ "Slide source written"
+  end
+
+  test ":w keeps invalid markdown in the editor without changing the deck file" do
+    source = "---\nlayout: bullets\ntitle: Old\n---\n- item"
+
+    path =
+      Path.join(System.tmp_dir!(), "easy-breezy-invalid-#{System.unique_integer([:positive])}.md")
+
+    File.write!(path, source)
+    on_exit(fn -> File.rm(path) end)
+
+    session = start_session(deck: EasyBreezy.Deck.Markdown.load!(path))
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    input_keys(session, ["i", "e", "j"] ++ List.duplicate("l", 6) ++ ["x", ":", "w", "Enter"])
+
+    assert File.read!(path) == source
+
+    metadata = Breeze.Test.metadata(session)
+    assert metadata.assigns.source_editor.dirty?
+    assert metadata.assigns.source_editor.message =~ "invalid slide frontmatter"
   end
 
   test "raw escape closes the slide number prompt while the input is focused" do
@@ -245,18 +357,30 @@ defmodule EasyBreezy.SlideshowTest do
     start_session([])
   end
 
+  defp input_keys(session, keys) do
+    Enum.each(keys, fn key ->
+      assert {:noreply, _focused, _changed?} = Breeze.Test.input(session, key)
+    end)
+  end
+
   defp start_session(opts) do
     deck = Keyword.get(opts, :deck, deck())
+
+    start_opts =
+      Keyword.merge(
+        [
+          deck: deck,
+          alt_screen: false,
+          themes: [:nebula],
+          theme: :nebula
+        ],
+        Keyword.get(opts, :start_opts, [])
+      )
 
     test_opts = [
       size: {80, 24},
       theme: Breeze.Theme.builtin(:nebula),
-      start_opts: [
-        deck: deck,
-        alt_screen: false,
-        themes: [:nebula],
-        theme: :nebula
-      ]
+      start_opts: start_opts
     ]
 
     test_opts =

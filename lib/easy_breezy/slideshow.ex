@@ -2,11 +2,14 @@ defmodule EasyBreezy.Slideshow do
   use Breeze.View
 
   alias EasyBreezy.Layouts.CodeSlide
+  alias EasyBreezy.Deck.Markdown.Editor, as: MarkdownEditor
   alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
   alias EasyBreezy.PresenterScroll
+  alias EasyBreezy.SourceEditor
   import Breeze.Blocks
   import EasyBreezy.Layouts
+  import EasyBreezy.Layouts.SourceEditorView
   import EasyBreezy.Transitions
   alias Breeze.Theme
 
@@ -48,6 +51,7 @@ defmodule EasyBreezy.Slideshow do
         presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
         presenter_subscribers: MapSet.new(),
         keybindings_bar?: Keyword.get(opts, :keybindings_bar?, true),
+        source_editor: Keyword.get(opts, :source_editor),
         source_mode?: Keyword.get(opts, :source_mode?, false),
         live_state: %{},
         themes: Keyword.get(opts, :themes, @themes),
@@ -59,6 +63,7 @@ defmodule EasyBreezy.Slideshow do
       |> assign_theme_context()
       |> maybe_put_scroll_keybindings()
       |> maybe_register_presentation()
+      |> maybe_restore_source_save_flash(opts)
       |> maybe_publish_presentation_soon()
 
     {:ok, term |> clamp_position() |> focus_visible_live_slide()}
@@ -124,8 +129,16 @@ defmodule EasyBreezy.Slideshow do
               render_context={@render_context}
             />
             <.slide_source
-              :if={@source_mode?}
+              :if={@source_mode? && is_nil(@source_editor)}
               slide={@slide}
+              body_width={@body_width}
+              body_height={@body_height}
+              render_context={@render_context}
+            />
+            <.source_editor_view
+              :if={@source_mode? && !is_nil(@source_editor)}
+              title={"#{@slide.title} source"}
+              editor={@source_editor}
               body_width={@body_width}
               body_height={@body_height}
               render_context={@render_context}
@@ -176,6 +189,7 @@ defmodule EasyBreezy.Slideshow do
           {@goto_slide_error}
         </box>
       </.modal>
+      <.flash_group flash={@breeze.flash} width={42}/>
     </box>
     """
   end
@@ -200,6 +214,18 @@ defmodule EasyBreezy.Slideshow do
 
   def handle_event(_, %{"key" => _key}, %{assigns: %{goto_modal?: true}} = term) do
     {:noreply, term}
+  end
+
+  def handle_event(
+        _,
+        %{"key" => _key} = event,
+        %{assigns: %{source_editor: %SourceEditor{}}} = term
+      ) do
+    {:noreply, handle_source_editor_event(term, event)}
+  end
+
+  def handle_event(_, %{"key" => "e"}, %{assigns: %{source_mode?: true}} = term) do
+    {:noreply, term |> open_source_editor() |> maybe_publish_presentation_soon()}
   end
 
   def handle_event(_, %{"key" => "g"}, term) do
@@ -277,7 +303,7 @@ defmodule EasyBreezy.Slideshow do
      |> maybe_publish_presentation_soon()}
   end
 
-  def handle_event(_, %{"key" => key}, term) when key in ["q" | @escape_keys] do
+  def handle_event(_, %{"key" => "q"}, term) do
     {:stop, term}
   end
 
@@ -294,6 +320,16 @@ defmodule EasyBreezy.Slideshow do
 
   def handle_info(:publish_presentation_state, term) do
     maybe_publish_presentation(term)
+    {:noreply, term, invalidate: false}
+  end
+
+  def handle_info({:clear_source_save_notice, id}, term) do
+    term =
+      case Map.get(term.assigns, :source_save_notice) do
+        %{id: ^id} -> assign(term, source_save_notice: nil)
+        _notice -> term
+      end
+
     {:noreply, term, invalidate: false}
   end
 
@@ -519,12 +555,17 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp scroll_and_publish(term, event) do
-    if visible_synced_live_slide?(term.assigns) do
-      focus_visible_live_slide(term)
-    else
-      term
-      |> PresenterScroll.apply(PresenterScroll.event(event))
-      |> maybe_publish_presentation_soon()
+    cond do
+      match?(%SourceEditor{}, term.assigns.source_editor) ->
+        handle_source_editor_event(term, PresenterScroll.event(event))
+
+      visible_synced_live_slide?(term.assigns) ->
+        focus_visible_live_slide(term)
+
+      true ->
+        term
+        |> PresenterScroll.apply(PresenterScroll.event(event))
+        |> maybe_publish_presentation_soon()
     end
   end
 
@@ -581,6 +622,7 @@ defmodule EasyBreezy.Slideshow do
       started_at_ms: assigns.started_at_ms,
       elapsed_ms: ElapsedTime.elapsed_ms(assigns.started_at_ms),
       source_mode?: assigns.source_mode?,
+      source_editor: SourceEditor.snapshot(assigns.source_editor),
       theme_name: assigns.theme_name,
       actual_theme_mode: assigns.actual_theme_mode,
       theme_status: assigns.theme_status,
@@ -637,6 +679,12 @@ defmodule EasyBreezy.Slideshow do
     |> maybe_publish_presentation_soon()
   end
 
+  defp handle_presenter_command(:edit_source, term) do
+    term
+    |> open_source_editor()
+    |> maybe_publish_presentation_soon()
+  end
+
   defp handle_presenter_command({:scroll, event}, term) when is_map(event) do
     if visible_synced_live_slide?(term.assigns) do
       focus_visible_live_slide(term)
@@ -648,9 +696,13 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp handle_presenter_command({:input, %{"key" => _key} = event}, term) do
-    case dispatch_visible_live_input(term, event) do
-      {:consumed, term} -> maybe_publish_presentation_soon(term)
-      {:not_consumed, term} -> handle_presenter_key_event(event, term)
+    if match?(%SourceEditor{}, term.assigns.source_editor) do
+      handle_source_editor_event(term, event)
+    else
+      case dispatch_visible_live_input(term, event) do
+        {:consumed, term} -> maybe_publish_presentation_soon(term)
+        {:not_consumed, term} -> handle_presenter_key_event(event, term)
+      end
     end
   end
 
@@ -879,7 +931,7 @@ defmodule EasyBreezy.Slideshow do
 
     term =
       term
-      |> assign(source_mode?: source_mode?)
+      |> assign(source_mode?: source_mode?, source_editor: nil)
       |> focus_visible_live_slide()
 
     if source_mode? and image_slide?(visible_slide(term.assigns)) do
@@ -887,6 +939,111 @@ defmodule EasyBreezy.Slideshow do
     else
       term
     end
+  end
+
+  defp open_source_editor(term) do
+    slide = visible_slide(term.assigns)
+
+    case Map.get(slide, :source) do
+      source when is_binary(source) -> assign(term, source_editor: SourceEditor.new(source))
+      _source -> assign(term, source_editor: nil)
+    end
+  end
+
+  defp handle_source_editor_event(term, event) do
+    case SourceEditor.handle_key(term.assigns.source_editor, event) do
+      {:ok, editor} ->
+        term
+        |> assign(source_editor: editor)
+        |> maybe_publish_presentation_soon()
+
+      {:command, command, editor} ->
+        term
+        |> assign(source_editor: editor)
+        |> execute_source_editor_command(command)
+        |> maybe_publish_presentation_soon()
+    end
+  end
+
+  defp execute_source_editor_command(term, command) when command in ["w", "write"],
+    do: save_source_editor(term, false)
+
+  defp execute_source_editor_command(term, command) when command in ["wq", "x"],
+    do: save_source_editor(term, true)
+
+  defp execute_source_editor_command(term, "q") do
+    if term.assigns.source_editor.dirty? do
+      put_source_editor_message(term, "No write since last change (:q! to discard)")
+    else
+      close_source_editor(term)
+    end
+  end
+
+  defp execute_source_editor_command(term, "q!"), do: close_source_editor(term)
+  defp execute_source_editor_command(term, ""), do: term
+
+  defp execute_source_editor_command(term, command),
+    do: put_source_editor_message(term, "Not an editor command: #{command}")
+
+  defp save_source_editor(term, close?) do
+    editor = term.assigns.source_editor
+    slide = visible_slide(term.assigns)
+
+    with {:ok, deck, save_result} <-
+           MarkdownEditor.save(term.assigns.deck, slide, SourceEditor.source(editor)) do
+      body_width = max(term.assigns.screen_width - 6, 20)
+      editor = SourceEditor.mark_saved(editor)
+
+      term
+      |> assign(
+        deck: normalize_deck_steps(deck, body_width),
+        source_editor: unless(close?, do: editor)
+      )
+      |> maybe_close_source_editor(close?)
+      |> clamp_position()
+      |> put_source_save_flash(save_result)
+    else
+      {:error, reason} -> put_source_editor_message(term, reason)
+    end
+  end
+
+  defp save_message(:written), do: "Slide source written"
+  defp save_message(:updated), do: "Updated in memory"
+
+  defp put_source_save_flash(term, save_result) do
+    notice = %{
+      id: System.unique_integer([:positive, :monotonic]),
+      message: save_message(save_result)
+    }
+
+    Process.send_after(self(), {:clear_source_save_notice, notice.id}, 3_000)
+
+    term
+    |> assign(source_save_notice: notice)
+    |> put_flash(:success, notice.message, id: "source-written", duration: 3_000)
+  end
+
+  defp maybe_restore_source_save_flash(term, opts) do
+    case Keyword.get(opts, :source_save_notice) do
+      %{message: message} when is_binary(message) ->
+        put_flash(term, :success, message, id: "source-written", duration: 3_000)
+
+      _message ->
+        term
+    end
+  end
+
+  defp put_source_editor_message(term, message) do
+    assign(term, source_editor: SourceEditor.put_message(term.assigns.source_editor, message))
+  end
+
+  defp maybe_close_source_editor(term, true), do: close_source_editor(term)
+  defp maybe_close_source_editor(term, false), do: term
+
+  defp close_source_editor(term) do
+    term
+    |> assign(source_editor: nil, source_mode?: false)
+    |> focus_visible_live_slide()
   end
 
   defp next_slide_title(assigns, slide_index) do

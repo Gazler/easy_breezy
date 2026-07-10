@@ -6,16 +6,20 @@ defmodule EasyBreezy.Deck.Markdown do
   alias EasyBreezy.Deck.Markdown.LineParser
 
   def load!(path) when is_binary(path) do
+    path = Path.expand(path)
+
     path
     |> File.read!()
-    |> parse!(base_path: Path.dirname(Path.expand(path)))
+    |> parse!(base_path: Path.dirname(path), source_path: path)
   end
 
   def parse!(source, opts \\ []) when is_binary(source) do
+    source = normalize_newlines(source)
+
     source
-    |> normalize_newlines()
     |> split_entries()
-    |> build_deck(opts)
+    |> attach_source_ranges(source)
+    |> build_deck(Keyword.put(opts, :source, source))
   end
 
   def markdown_path?(path) when is_binary(path) do
@@ -126,6 +130,47 @@ defmodule EasyBreezy.Deck.Markdown do
     Enum.reject(entries, fn entry -> entry.meta == %{} and String.trim(entry.body) == "" end)
   end
 
+  defp attach_source_ranges(entries, source) do
+    {entries, _offset} =
+      Enum.map_reduce(entries, 0, fn entry, offset ->
+        case source_range(source, entry, offset) do
+          {start, length} = range -> {Map.put(entry, :source_range, range), start + length}
+          nil -> {Map.put(entry, :source_range, nil), offset}
+        end
+      end)
+
+    entries
+  end
+
+  defp source_range(source, %{source: "---\n" <> _rest} = entry, offset) do
+    body_size = byte_size(entry.body)
+    header_size = byte_size(entry.source) - if(body_size == 0, do: 0, else: body_size + 1)
+    header = binary_part(entry.source, 0, header_size)
+
+    with {start, _header_length} <- binary_match(source, header, offset),
+         {body_start, body_length} <- body_range(source, entry.body, start + header_size) do
+      {start, body_start + body_length - start}
+    else
+      _other -> nil
+    end
+  end
+
+  defp source_range(source, %{source: entry_source}, offset) do
+    binary_match(source, entry_source, offset)
+  end
+
+  defp body_range(_source, "", header_end), do: {header_end, 0}
+  defp body_range(source, body, header_end), do: binary_match(source, body, header_end)
+
+  defp binary_match(source, needle, offset) do
+    scope_length = byte_size(source) - offset
+
+    case :binary.match(source, needle, scope: {offset, scope_length}) do
+      {start, length} -> {start, length}
+      :nomatch -> nil
+    end
+  end
+
   defp frontmatter_block?(frontmatter) do
     case FrontmatterParser.frontmatter(frontmatter) do
       {:ok, entries, "", _context, _line, _offset} -> entries != []
@@ -220,7 +265,9 @@ defmodule EasyBreezy.Deck.Markdown do
 
     %Deck{
       title: Map.get(deck_meta, :title) || first_slide_title(slides) || "Untitled Deck",
-      slides: slides
+      slides: slides,
+      source: Keyword.get(opts, :source),
+      source_path: Keyword.get(opts, :source_path)
     }
   end
 
@@ -245,6 +292,7 @@ defmodule EasyBreezy.Deck.Markdown do
       title: title,
       layout: layout,
       source: Map.get(entry, :source),
+      source_range: Map.get(entry, :source_range),
       payload: payload,
       steps: Map.get(payload_meta, :steps, default_steps(layout, payload_meta, body)),
       transition: Map.get(payload_meta, :transition, :slide),

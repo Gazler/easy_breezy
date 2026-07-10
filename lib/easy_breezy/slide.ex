@@ -4,6 +4,7 @@ defmodule EasyBreezy.Slide do
     :title,
     :layout,
     :source,
+    :source_range,
     :payload,
     steps: 0,
     transition: :slide,

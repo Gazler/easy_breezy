@@ -233,6 +233,66 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
     assert eventually(fn -> render_plain(presenter) =~ "layout: bullets" end)
   end
 
+  test "presenter renders and forwards source editor input" do
+    {presentation, presenter} = start_pair(markdown_deck())
+
+    on_exit(fn ->
+      Breeze.Test.stop(presenter)
+      Breeze.Test.stop(presentation)
+    end)
+
+    assert {:noreply, _focused, _changed?} = Breeze.Test.input(presenter, "i")
+    assert eventually(fn -> Breeze.Test.metadata(presentation).assigns.source_mode? end)
+    assert eventually(fn -> Breeze.Test.metadata(presenter).assigns.source_mode? end)
+
+    assert {:noreply, _focused, _changed?} = Breeze.Test.input(presenter, "e")
+
+    assert eventually(fn ->
+             match?(
+               %EasyBreezy.SourceEditor{},
+               Breeze.Test.metadata(presentation).assigns.source_editor
+             )
+           end)
+
+    assert eventually(fn -> render_plain(presenter) =~ "Vim-like editor" end)
+
+    assert {:noreply, _focused, _changed?} = Breeze.Test.input(presenter, "i")
+
+    assert eventually(fn ->
+             Breeze.Test.metadata(presentation).assigns.source_editor.mode == :insert
+           end)
+
+    assert {:noreply, _focused, _changed?} = Breeze.Test.input(presenter, "X")
+
+    assert eventually(fn ->
+             presentation
+             |> Breeze.Test.metadata()
+             |> then(&EasyBreezy.SourceEditor.source(&1.assigns.source_editor))
+             |> String.starts_with?("X")
+           end)
+
+    assert eventually(fn ->
+             presenter
+             |> Breeze.Test.metadata()
+             |> then(&EasyBreezy.SourceEditor.source(&1.assigns.source_editor))
+             |> String.starts_with?("X")
+           end)
+
+    Enum.each(["Escape", ":", "w", "Enter"], fn key ->
+      assert {:noreply, _focused, _changed?} = Breeze.Test.input(presenter, key)
+    end)
+
+    assert eventually(fn ->
+             String.starts_with?(Breeze.Test.metadata(presentation).assigns.deck.source, "X")
+           end)
+
+    assert eventually(fn ->
+             String.starts_with?(Breeze.Test.metadata(presenter).assigns.deck.source, "X")
+           end)
+
+    assert eventually(fn -> render_plain(presenter) =~ "Updated in memory" end)
+  end
+
   defp start_pair(deck) do
     sync_name = {:easy_breezy_live_forwarding_test, System.unique_integer([:positive])}
 
