@@ -92,6 +92,22 @@ defmodule EasyBreezy.SlideshowTest do
     refute Breeze.Test.render!(session) =~ "Go To Slide"
   end
 
+  test "? toggles the keybindings bar" do
+    session = start_session()
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert Breeze.Test.render!(session) =~ "space advance"
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "?")
+    rendered = Breeze.Test.render!(session)
+
+    refute rendered =~ "space advance"
+    assert rendered |> strip_ansi() |> rendered_lines() |> List.last() |> String.starts_with?("└")
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "?")
+    assert Breeze.Test.render!(session) =~ "space advance"
+  end
+
   test "raw escape closes the slide number prompt while the input is focused" do
     session = start_session()
     on_exit(fn -> Breeze.Test.stop(session) end)
@@ -287,6 +303,10 @@ defmodule EasyBreezy.SlideshowTest do
       0 -> :ok
     end
   end
+
+  defp strip_ansi(text), do: Regex.replace(~r/\e\[[0-9;]*m/, text, "")
+
+  defp rendered_lines(text), do: String.split(text, "\n", trim: false)
 
   defp send_server_input(server, reader, raw) do
     send(server, {reader, {:data, raw}})

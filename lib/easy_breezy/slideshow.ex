@@ -46,6 +46,7 @@ defmodule EasyBreezy.Slideshow do
         presenter_mode: Keyword.get(opts, :presenter_mode, :single),
         presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
         presenter_subscribers: MapSet.new(),
+        keybindings_bar?: Keyword.get(opts, :keybindings_bar?, true),
         live_state: %{},
         themes: Keyword.get(opts, :themes, @themes),
         started_at_ms: System.monotonic_time(:millisecond),
@@ -63,14 +64,17 @@ defmodule EasyBreezy.Slideshow do
 
   def render(assigns) do
     {slide, slide_index, step} = visible_position(assigns)
+    footer? = footer_visible?(assigns)
     body_width = max(assigns.screen_width - 6, 20)
-    body_height = max(assigns.screen_height - 6, 8)
+    body_height = max(assigns.screen_height - if(footer?, do: 6, else: 5), 8)
 
     assigns =
       assigns
       |> assign(slide: slide)
       |> assign(visible_slide_index: slide_index)
       |> assign(visible_step: step)
+      |> assign(footer?: footer?)
+      |> assign(root_grid_class: root_grid_class(footer?))
       |> assign(body_width: body_width)
       |> assign(body_height: body_height)
       |> assign(progress: progress(slide_index, assigns))
@@ -88,7 +92,7 @@ defmodule EasyBreezy.Slideshow do
 
     ~H"""
     <box class="width-screen height-screen bg text">
-      <box class="grid grid-cols-1 grid-rows-3 width-screen height-screen">
+      <box class={@root_grid_class}>
         <box class="height-1 inline bg-panel text">
           <box class="bold text-primary"> {@deck.title} </box>
           <box class="text-muted"> {@screen_width}x{@screen_height} </box>
@@ -119,7 +123,7 @@ defmodule EasyBreezy.Slideshow do
             />
           </box>
         </box>
-        <box :if={not @presenter?} class="height-1 inline bg-panel text">
+        <box :if={not @presenter? && @keybindings_bar?} class="height-1 inline bg-panel text">
           <box> ←/h prev </box>
           <box> →/l next </box>
           <box> space advance </box>
@@ -191,6 +195,10 @@ defmodule EasyBreezy.Slideshow do
 
   def handle_event(_, %{"key" => "g"}, term) do
     {:noreply, open_goto_slide(term)}
+  end
+
+  def handle_event(_, %{"key" => "?"}, term) do
+    {:noreply, assign(term, keybindings_bar?: not term.assigns.keybindings_bar?)}
   end
 
   def handle_event(_, %{"key" => key}, term) when key in @live_slide_movement_keys do
@@ -348,6 +356,15 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_info(_, term), do: {:noreply, term}
+
+  defp footer_visible?(%{presenter?: true}), do: true
+  defp footer_visible?(%{keybindings_bar?: keybindings_bar?}), do: keybindings_bar?
+
+  defp root_grid_class(true),
+    do: "grid grid-cols-1 grid-rows-3 width-screen height-screen"
+
+  defp root_grid_class(false),
+    do: "grid grid-cols-1 grid-rows-2 width-screen height-screen"
 
   defp open_goto_slide(term) do
     term
