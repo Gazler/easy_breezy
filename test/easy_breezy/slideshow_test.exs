@@ -108,6 +108,41 @@ defmodule EasyBreezy.SlideshowTest do
     assert Breeze.Test.render!(session) =~ "space advance"
   end
 
+  test "i toggles the current slide markdown source" do
+    deck =
+      EasyBreezy.Deck.Markdown.parse!("""
+      ---
+      layout: bullets
+      title: Why
+      ---
+      - Rendered bullet
+      """)
+
+    session = start_session(deck: deck)
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert plain =~ "• Rendered bullet"
+    refute plain =~ "layout: bullets"
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "i")
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert plain =~ "Why source"
+    assert plain =~ "layout: bullets"
+    assert plain =~ "- Rendered bullet"
+    refute plain =~ "• Rendered bullet"
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "i")
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert plain =~ "• Rendered bullet"
+    refute plain =~ "layout: bullets"
+  end
+
   test "raw escape closes the slide number prompt while the input is focused" do
     session = start_session()
     on_exit(fn -> Breeze.Test.stop(session) end)

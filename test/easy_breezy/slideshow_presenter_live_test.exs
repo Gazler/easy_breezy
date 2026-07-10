@@ -215,6 +215,24 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
     assert eventually(fn -> render_plain(presenter) =~ "Plain" end)
   end
 
+  test "presenter toggles the presentation source mode" do
+    {presentation, presenter} = start_pair(markdown_deck())
+
+    on_exit(fn ->
+      Breeze.Test.stop(presenter)
+      Breeze.Test.stop(presentation)
+    end)
+
+    assert eventually(fn -> render_plain(presenter) =~ "Rendered bullet" end)
+    refute render_plain(presentation) =~ "layout: bullets"
+
+    assert {:noreply, _focused, _changed?} = Breeze.Test.input(presenter, "i")
+
+    assert eventually(fn -> Breeze.Test.metadata(presentation).assigns.source_mode? end)
+    assert eventually(fn -> render_plain(presentation) =~ "layout: bullets" end)
+    assert eventually(fn -> render_plain(presenter) =~ "layout: bullets" end)
+  end
+
   defp start_pair(deck) do
     sync_name = {:easy_breezy_live_forwarding_test, System.unique_integer([:positive])}
 
@@ -368,6 +386,16 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
         }
       ]
     }
+  end
+
+  defp markdown_deck do
+    EasyBreezy.Deck.Markdown.parse!("""
+    ---
+    layout: bullets
+    title: Markdown
+    ---
+    - Rendered bullet
+    """)
   end
 
   defp wait_for_payload(fun, attempts \\ 20)

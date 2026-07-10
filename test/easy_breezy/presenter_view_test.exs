@@ -177,6 +177,40 @@ defmodule EasyBreezy.PresenterViewTest do
     refute plain =~ "0-"
   end
 
+  test "current preview renders slide source when the presentation is in source mode" do
+    deck =
+      Markdown.parse!("""
+      ---
+      layout: bullets
+      title: Why
+      ---
+      - Rendered bullet
+      """)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    payload =
+      deck
+      |> presentation_payload(0)
+      |> Map.put(:source_mode?, true)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert plain =~ "Why source"
+    assert plain =~ "layout: bullets"
+    assert plain =~ "- Rendered bullet"
+    refute plain =~ "• Rendered bullet"
+  end
+
   test "next preview activates kitty image overlays sized to the preview box" do
     path = Path.join(System.tmp_dir!(), "easy_breezy_presenter_preview.img")
     File.write!(path, "preview-image")

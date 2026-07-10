@@ -3,6 +3,7 @@ defmodule EasyBreezy.Slide do
     :id,
     :title,
     :layout,
+    :source,
     :payload,
     steps: 0,
     transition: :slide,

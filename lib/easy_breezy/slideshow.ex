@@ -48,6 +48,7 @@ defmodule EasyBreezy.Slideshow do
         presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
         presenter_subscribers: MapSet.new(),
         keybindings_bar?: Keyword.get(opts, :keybindings_bar?, true),
+        source_mode?: Keyword.get(opts, :source_mode?, false),
         live_state: %{},
         themes: Keyword.get(opts, :themes, @themes),
         started_at_ms: System.monotonic_time(:millisecond),
@@ -105,7 +106,7 @@ defmodule EasyBreezy.Slideshow do
         <box class="height-full">
           <box class="border border-stroke bg-surface width-full height-full">
             <.slide_transition
-              :if={@transition}
+              :if={@transition && !@source_mode?}
               transition={@transition}
               deck={@deck}
               body_width={@body_width}
@@ -114,12 +115,19 @@ defmodule EasyBreezy.Slideshow do
               render_context={@render_context}
             />
             <.slide_body
-              :if={is_nil(@transition)}
+              :if={is_nil(@transition) && !@source_mode?}
               slide={@slide}
               step={@visible_step}
               body_width={@body_width}
               body_height={@body_height}
               live_state={@live_state}
+              render_context={@render_context}
+            />
+            <.slide_source
+              :if={@source_mode?}
+              slide={@slide}
+              body_width={@body_width}
+              body_height={@body_height}
               render_context={@render_context}
             />
           </box>
@@ -200,6 +208,10 @@ defmodule EasyBreezy.Slideshow do
 
   def handle_event(_, %{"key" => "?"}, term) do
     {:noreply, assign(term, keybindings_bar?: not term.assigns.keybindings_bar?)}
+  end
+
+  def handle_event(_, %{"key" => "i"}, term) do
+    {:noreply, term |> toggle_source_mode() |> maybe_publish_presentation_soon()}
   end
 
   def handle_event(_, %{"key" => key}, term) when key in @live_slide_movement_keys do
@@ -568,6 +580,7 @@ defmodule EasyBreezy.Slideshow do
       presenter?: assigns.presenter?,
       started_at_ms: assigns.started_at_ms,
       elapsed_ms: ElapsedTime.elapsed_ms(assigns.started_at_ms),
+      source_mode?: assigns.source_mode?,
       theme_name: assigns.theme_name,
       actual_theme_mode: assigns.actual_theme_mode,
       theme_status: assigns.theme_status,
@@ -618,6 +631,12 @@ defmodule EasyBreezy.Slideshow do
     |> maybe_publish_presentation_soon()
   end
 
+  defp handle_presenter_command(:toggle_source_mode, term) do
+    term
+    |> toggle_source_mode()
+    |> maybe_publish_presentation_soon()
+  end
+
   defp handle_presenter_command({:scroll, event}, term) when is_map(event) do
     if visible_synced_live_slide?(term.assigns) do
       focus_visible_live_slide(term)
@@ -655,7 +674,8 @@ defmodule EasyBreezy.Slideshow do
   defp dispatch_visible_live_input(term, event) do
     slide = visible_slide(term.assigns)
 
-    with true <- LiveSlide.live?(slide) and LiveSlide.sync?(slide),
+    with false <- term.assigns.source_mode?,
+         true <- LiveSlide.live?(slide) and LiveSlide.sync?(slide),
          id when is_binary(id) <- LiveSlide.id(slide) do
       case dispatch_server_live_input(term, id, event) do
         {:ok, result} -> result
@@ -833,19 +853,41 @@ defmodule EasyBreezy.Slideshow do
   defp visible_slide(assigns), do: current_slide(assigns)
 
   defp visible_synced_live_slide?(assigns) do
-    slide = visible_slide(assigns)
-    LiveSlide.live?(slide) and LiveSlide.sync?(slide)
+    if assigns.source_mode? do
+      false
+    else
+      slide = visible_slide(assigns)
+      LiveSlide.live?(slide) and LiveSlide.sync?(slide)
+    end
   end
 
   defp visible_live_slide_id(assigns) do
     slide = visible_slide(assigns)
 
-    if LiveSlide.live?(slide) and LiveSlide.sync?(slide) do
+    if not assigns.source_mode? and LiveSlide.live?(slide) and LiveSlide.sync?(slide) do
       LiveSlide.id(slide)
     end
   end
 
+  defp focus_visible_live_slide(%{assigns: %{source_mode?: true}} = term),
+    do: Breeze.View.focus(term, nil)
+
   defp focus_visible_live_slide(term), do: LiveSlide.focus(term, visible_slide(term.assigns))
+
+  defp toggle_source_mode(term) do
+    source_mode? = not term.assigns.source_mode?
+
+    term =
+      term
+      |> assign(source_mode?: source_mode?)
+      |> focus_visible_live_slide()
+
+    if source_mode? and image_slide?(visible_slide(term.assigns)) do
+      EasyBreezy.Slideshow.KittyImage.delete_overlay(term)
+    else
+      term
+    end
+  end
 
   defp next_slide_title(assigns, slide_index) do
     case Enum.at(assigns.deck.slides, slide_index + 1) do

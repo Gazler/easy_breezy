@@ -48,6 +48,7 @@ defmodule EasyBreezy do
       :sync_name,
       :presenter_sync_node,
       :sync_node,
+      :source_mode?,
       :themes
     ])
     |> Keyword.put(:presenter_mode, presenter_mode(opts))
@@ -187,6 +188,7 @@ defmodule EasyBreezy do
     |> maybe_put_assign(assigns, :slide_index)
     |> maybe_put_assign(assigns, :step)
     |> maybe_put_assign(assigns, :started_at_ms)
+    |> maybe_put_assign(assigns, :source_mode?)
     |> maybe_put_presenter(assigns)
     |> maybe_put_theme(assigns)
   end

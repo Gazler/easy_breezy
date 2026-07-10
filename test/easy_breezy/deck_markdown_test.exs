@@ -127,6 +127,28 @@ defmodule EasyBreezy.DeckMarkdownTest do
            } = Markdown.parse!("# Plain\n\nBody text")
   end
 
+  test "keeps slide markdown source" do
+    assert %Deck{
+             slides: [
+               %Slide{source: "# Plain\n\nBody text"},
+               %Slide{
+                 source: "---\nlayout: bullets\ntitle: Why\n---\n- One\n- Two"
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             # Plain
+
+             Body text
+             ---
+             layout: bullets
+             title: Why
+             ---
+             - One
+             - Two
+             """)
+  end
+
   test "preserves markdown before slide separators" do
     assert %Deck{
              slides: [

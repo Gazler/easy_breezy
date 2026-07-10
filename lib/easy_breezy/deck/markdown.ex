@@ -38,7 +38,7 @@ defmodule EasyBreezy.Deck.Markdown do
 
     case {starts_with_delimiter?, chunks} do
       {false, [single]} ->
-        [%{meta: %{}, body: single}]
+        [%{meta: %{}, body: single, source: String.trim(single, "\n")}]
 
       {true, chunks} ->
         pair_frontmatter_entries(chunks)
@@ -82,23 +82,44 @@ defmodule EasyBreezy.Deck.Markdown do
   end
 
   defp entries_after_leading_body([body | parts]) do
-    [%{meta: %{}, body: String.trim(body, "\n")} | entries_after_body(parts)]
+    body = String.trim(body, "\n")
+
+    [%{meta: %{}, body: body, source: body} | entries_after_body(parts)]
     |> reject_empty_entries()
   end
 
   defp entries_after_body([]), do: []
-  defp entries_after_body([body]), do: [%{meta: %{}, body: String.trim(body, "\n")}]
+
+  defp entries_after_body([body]) do
+    body = String.trim(body, "\n")
+    [%{meta: %{}, body: body, source: body}]
+  end
 
   defp entries_after_body([frontmatter, body | rest]) do
     if frontmatter_block?(frontmatter) do
       [frontmatter_entry(frontmatter, body) | entries_after_body(rest)]
     else
-      [%{meta: %{}, body: String.trim(frontmatter, "\n")} | entries_after_body([body | rest])]
+      frontmatter = String.trim(frontmatter, "\n")
+      [%{meta: %{}, body: frontmatter, source: frontmatter} | entries_after_body([body | rest])]
     end
   end
 
   defp frontmatter_entry(frontmatter, body) do
-    %{meta: parse_frontmatter!(frontmatter), body: String.trim(body, "\n")}
+    body = String.trim(body, "\n")
+
+    %{
+      meta: parse_frontmatter!(frontmatter),
+      body: body,
+      source: frontmatter_source(frontmatter, body)
+    }
+  end
+
+  defp frontmatter_source(frontmatter, "") do
+    "---\n#{String.trim(frontmatter, "\n")}\n---"
+  end
+
+  defp frontmatter_source(frontmatter, body) do
+    "---\n#{String.trim(frontmatter, "\n")}\n---\n#{body}"
   end
 
   defp reject_empty_entries(entries) do
@@ -213,7 +234,7 @@ defmodule EasyBreezy.Deck.Markdown do
   defp first_slide_title([%Slide{title: title} | _]), do: title
   defp first_slide_title(_slides), do: nil
 
-  defp build_slide(%{meta: meta, body: body}, index, base_path) do
+  defp build_slide(%{meta: meta, body: body} = entry, index, base_path) do
     layout = meta |> Map.get(:layout, :markdown) |> normalize_layout()
     title = Map.get(meta, :title) || infer_title(body) || "Slide #{index}"
     payload_meta = Map.put(meta, :title, title)
@@ -223,6 +244,7 @@ defmodule EasyBreezy.Deck.Markdown do
       id: Map.get(payload_meta, :id) || slide_id(title, index),
       title: title,
       layout: layout,
+      source: Map.get(entry, :source),
       payload: payload,
       steps: Map.get(payload_meta, :steps, default_steps(layout, payload_meta, body)),
       transition: Map.get(payload_meta, :transition, :slide),

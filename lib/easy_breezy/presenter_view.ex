@@ -57,6 +57,7 @@ defmodule EasyBreezy.PresenterView do
         themes: Keyword.get(opts, :themes, @themes),
         started_at_ms: started_at_ms,
         elapsed_label: ElapsedTime.label(started_at_ms),
+        source_mode?: false,
         theme_name: theme_name,
         actual_theme_mode: term.theme.mode,
         theme_status: Theme.probe_status(term.theme) || :ready
@@ -135,6 +136,7 @@ defmodule EasyBreezy.PresenterView do
       |> assign(next_body_style: next_body_style)
       |> assign(next_label: next_label)
       |> assign(next_label_style: next_label_style)
+      |> assign(current_source?: assigns.source_mode?)
       |> assign(current_live_slide?: current_live_slide?)
       |> assign(current_live_snapshot?: current_live_snapshot?)
       |> assign(current_live_placeholder?: current_live_placeholder?)
@@ -167,7 +169,15 @@ defmodule EasyBreezy.PresenterView do
       <box :if={@synced?} class="width-full height-full">
         <box class="inline width-full">
           <box style={@current_style} class="border border-stroke bg-surface overflow-hidden">
-            <box :if={!@current_live_slide?} class="width-full height-full">
+            <box :if={@current_source?} class="width-full height-full">
+              <.slide_source
+                slide={@slide}
+                body_width={@current_body_width}
+                body_height={@current_body_height}
+                render_context={@render_context}
+              />
+            </box>
+            <box :if={!@current_source? && !@current_live_slide?} class="width-full height-full">
               <.slide_body
                 slide={@slide}
                 step={@visible_step}
@@ -177,10 +187,13 @@ defmodule EasyBreezy.PresenterView do
                 render_context={@render_context}
               />
             </box>
-            <box :if={@current_live_snapshot?} class="width-full height-full overflow-hidden">
+            <box
+              :if={!@current_source? && @current_live_snapshot?}
+              class="width-full height-full overflow-hidden"
+            >
               {Map.get(@live_snapshot, :content, "")}
             </box>
-            <box :if={@current_live_placeholder?} class="width-full height-full">
+            <box :if={!@current_source? && @current_live_placeholder?} class="width-full height-full">
               <box>{" "}</box>
               <box class="bold text-secondary">Live Slide</box>
               <box class="text-muted">{@slide.title}</box>
@@ -289,6 +302,9 @@ defmodule EasyBreezy.PresenterView do
 
   def handle_event(_, %{"key" => "\x14"}, term), do: {:noreply, send_command(term, :cycle_theme)}
 
+  def handle_event(_, %{"key" => "i"}, term),
+    do: {:noreply, send_command(term, :toggle_source_mode)}
+
   def handle_event(_, %{"key" => key}, term) when key in ["q", "Escape"] do
     {:stop, KittyImage.delete_overlay(term)}
   end
@@ -349,6 +365,7 @@ defmodule EasyBreezy.PresenterView do
         presentation_screen_height: Map.get(payload, :screen_height),
         started_at_ms: started_at_ms,
         elapsed_label: ElapsedTime.label(started_at_ms),
+        source_mode?: Map.get(payload, :source_mode?, term.assigns.source_mode?),
         theme_name: theme_name,
         actual_theme_mode: Map.get(payload, :actual_theme_mode, term.assigns.actual_theme_mode),
         theme_status: Map.get(payload, :theme_status, term.assigns.theme_status),
@@ -438,8 +455,9 @@ defmodule EasyBreezy.PresenterView do
   defp visible_image_keys(assigns) do
     {slide, slide_index, _step} = current_position(assigns)
     next_slide = Enum.at(assigns.deck.slides, slide_index + 1)
+    current_slide = if assigns.source_mode?, do: nil, else: slide
 
-    [{:current, slide}, {:next, next_slide}]
+    [{:current, current_slide}, {:next, next_slide}]
     |> Enum.flat_map(fn {slot, slide} ->
       slide
       |> image_slide_keys()
@@ -469,7 +487,7 @@ defmodule EasyBreezy.PresenterView do
 
   defp current_synced_live_slide?(assigns) do
     {slide, _slide_index, _step} = current_position(assigns)
-    LiveSlide.live?(slide) and LiveSlide.sync?(slide)
+    not assigns.source_mode? and LiveSlide.live?(slide) and LiveSlide.sync?(slide)
   end
 
   defp live_snapshot_matches?(snapshot, slide) when is_map(snapshot) do
@@ -532,7 +550,12 @@ defmodule EasyBreezy.PresenterView do
 
   defp focus_current_live_slide(term) do
     {slide, _slide_index, _step} = current_position(term.assigns)
-    LiveSlide.focus(term, slide)
+
+    if term.assigns.source_mode? do
+      Breeze.View.focus(term, nil)
+    else
+      LiveSlide.focus(term, slide)
+    end
   end
 
   defp speaker_notes(slide, body_width, step) do

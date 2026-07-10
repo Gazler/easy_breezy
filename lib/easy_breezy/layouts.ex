@@ -14,6 +14,40 @@ defmodule EasyBreezy.Layouts do
   alias EasyBreezy.Layouts.CodeSlide
 
   attr :slide, :any, required: true
+  attr :body_width, :integer, required: true
+  attr :body_height, :integer, required: true
+  attr :render_context, :map, default: %{}
+
+  def slide_source(assigns) do
+    source =
+      case Map.get(assigns.slide, :source) do
+        source when is_binary(source) and source != "" ->
+          source
+
+        _source ->
+          "No markdown source available for this slide."
+      end
+
+    assigns =
+      assigns
+      |> assign(source: source)
+      |> assign(source_title: "#{assigns.slide.title} source")
+
+    ~H"""
+    <.code_slide
+      title={@source_title}
+      language="markdown"
+      source={@source}
+      path={nil}
+      focus_ranges={[]}
+      body_width={@body_width}
+      body_height={@body_height}
+      render_context={@render_context}
+    />
+    """
+  end
+
+  attr :slide, :any, required: true
   attr :step, :integer, required: true
   attr :body_width, :integer, required: true
   attr :body_height, :integer, required: true
