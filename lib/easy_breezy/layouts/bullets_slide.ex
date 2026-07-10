@@ -21,16 +21,20 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
 
   def bullets_slide(assigns) do
     assigns = Map.merge(%{after_markdown: nil, render_context: %{}, reveal: :step}, assigns)
+
     immediate? = immediate_reveal?(assigns.reveal)
     visible_items = visible_items(assigns.items, assigns.step, immediate?)
-    after_markdown? = markdown_present?(assigns.after_markdown)
+    after_markdown_blocks = after_markdown_blocks(assigns.after_markdown)
 
-    show_after_markdown? =
-      after_markdown? and (immediate? or assigns.step >= length(assigns.items))
+    visible_after_markdown_blocks =
+      visible_after_markdown_blocks(after_markdown_blocks, assigns, immediate?)
+
+    pending_after_markdown? =
+      length(visible_after_markdown_blocks) < length(after_markdown_blocks)
 
     notes =
       if length(visible_items) < length(assigns.items) or
-           (after_markdown? and not show_after_markdown?) do
+           pending_after_markdown? do
         "[more]"
       else
         ""
@@ -39,7 +43,8 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
     item_lines =
       Enum.map(visible_items, &bullet_line(&1, assigns.body_width, assigns.render_context))
 
-    rendered_after_markdown_blocks = render_after_markdown_blocks(assigns, show_after_markdown?)
+    rendered_after_markdown_blocks =
+      render_after_markdown_blocks(assigns, visible_after_markdown_blocks)
 
     assigns =
       assigns
@@ -85,16 +90,15 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
     {Map.fetch!(assigns.block, :template), Map.get(assigns.block, :assigns, %{})}
   end
 
-  defp render_after_markdown_blocks(_assigns, false), do: []
+  defp render_after_markdown_blocks(_assigns, []), do: []
 
-  defp render_after_markdown_blocks(assigns, true) do
-    width = assigns.body_width
+  defp render_after_markdown_blocks(assigns, blocks) do
+    width = assigns.body_width + 4
     height = max(assigns.body_height, 1)
     render_opts = markdown_render_opts(assigns.render_context)
     env = __ENV__
 
-    assigns.after_markdown
-    |> Markdown.content_blocks()
+    blocks
     |> with_next_block()
     |> Enum.map(fn
       {%{type: :markdown, content: content}, next_block} ->
@@ -117,7 +121,6 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
     end)
   end
 
-  defp with_next_block([]), do: []
   defp with_next_block([_ | rest] = blocks), do: Enum.zip(blocks, rest ++ [nil])
 
   defp blank_after_markdown?(_content, nil), do: false
@@ -155,6 +158,23 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
 
   defp visible_items(items, _step, true), do: items
   defp visible_items(items, step, false), do: Enum.take(items, step + 1)
+
+  defp after_markdown_blocks(after_markdown) do
+    if markdown_present?(after_markdown) do
+      Markdown.content_blocks(after_markdown)
+    else
+      []
+    end
+  end
+
+  defp visible_after_markdown_blocks(blocks, assigns, immediate?) do
+    markdown_step = after_markdown_step(assigns, immediate?)
+    Enum.filter(blocks, &(Map.get(&1, :step, 0) <= markdown_step))
+  end
+
+  defp after_markdown_step(assigns, true), do: assigns.step
+
+  defp after_markdown_step(assigns, false), do: assigns.step - length(assigns.items)
 
   defp immediate_reveal?(value) when value in [:immediate, "immediate"], do: true
   defp immediate_reveal?(_value), do: false

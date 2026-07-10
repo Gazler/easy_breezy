@@ -88,6 +88,30 @@ defmodule EasyBreezy.DeckMarkdownTest do
     assert %{code_focus_ranges: [4]} = payload.(80, 2)
   end
 
+  test "parses speaker notes for code slides" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :code,
+                 payload: %{
+                   code_source: "IO.puts(:ok)",
+                   notes: "Mention the return value"
+                 }
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: code
+             title: Snippet
+             language: elixir
+             ---
+             IO.puts(:ok)
+
+             <!-- Mention the return value -->
+             """)
+  end
+
   test "keeps plain markdown slides available" do
     assert %Deck{
              title: "Plain",
@@ -187,6 +211,35 @@ defmodule EasyBreezy.DeckMarkdownTest do
              ---
              - One
              - Two
+
+             Final **note**.
+             """)
+  end
+
+  test "infers extra steps from trailing markdown step markers for immediate bullet slides" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :bullets,
+                 payload: %{
+                   items: ["One", "Two"],
+                   reveal: :immediate,
+                   after_markdown: "<!-- step -->\n\nFinal **note**."
+                 },
+                 steps: 1
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: bullets
+             title: Why
+             reveal: immediate
+             ---
+             - One
+             - Two
+
+             <!-- step -->
 
              Final **note**.
              """)

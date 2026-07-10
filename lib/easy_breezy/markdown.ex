@@ -199,12 +199,8 @@ defmodule EasyBreezy.Markdown do
         code_reset <> @code <> line
       end
 
-    padding =
-      if code_reset == "" do
-        ""
-      else
-        code_reset <> String.duplicate(" ", max(width - visible_width(line), 0))
-      end
+    padding_width = max(width - visible_width(line), 0)
+    padding = code_reset <> String.duplicate(" ", padding_width)
 
     line <> padding <> reset
   end

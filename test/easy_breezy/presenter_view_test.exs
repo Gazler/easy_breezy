@@ -1,6 +1,7 @@
 defmodule EasyBreezy.PresenterViewTest do
   use ExUnit.Case, async: false
 
+  alias EasyBreezy.Deck.Markdown
   alias EasyBreezy.{Deck, Slide}
 
   defmodule LivePreviewView do
@@ -115,6 +116,37 @@ defmodule EasyBreezy.PresenterViewTest do
     assert plain =~ "Live Demo"
     refute plain =~ "value: 7"
     refute plain =~ "Live counter"
+  end
+
+  test "speaker notes render for code slides" do
+    deck =
+      Markdown.parse!("""
+      ---
+      layout: code
+      title: File-backed Code
+      language: elixir
+      ---
+      IO.puts(:ok)
+
+      <!-- Mention the return value -->
+      """)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert plain =~ "Speaker notes"
+    assert plain =~ "Mention the return value"
+    refute plain =~ "No notes for this slide."
   end
 
   test "next preview activates kitty image overlays sized to the preview box" do

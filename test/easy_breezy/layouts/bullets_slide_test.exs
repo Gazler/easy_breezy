@@ -36,6 +36,82 @@ defmodule EasyBreezy.Layouts.BulletsSlideTest do
     refute rendered =~ "[more]"
   end
 
+  test "step markers delay trailing markdown for immediate reveal slides" do
+    first_step =
+      render_bullets!(
+        step: 0,
+        steps: 1,
+        reveal: :immediate,
+        items: ["One", "Two"],
+        after_markdown: """
+        <!-- step -->
+
+        Final **note**.
+        """
+      )
+
+    assert first_step =~ "• One"
+    assert first_step =~ "• Two"
+    assert first_step =~ "[more]"
+    refute first_step =~ "Final note."
+
+    extra_step =
+      render_bullets!(
+        step: 1,
+        steps: 1,
+        reveal: :immediate,
+        items: ["One", "Two"],
+        after_markdown: """
+        <!-- step -->
+
+        Final **note**.
+        """
+      )
+
+    assert extra_step =~ "• One"
+    assert extra_step =~ "• Two"
+    refute extra_step =~ "[more]"
+    assert extra_step =~ "Final note."
+  end
+
+  test "step markers reveal trailing markdown progressively after bullets" do
+    first_markdown_step =
+      render_bullets!(
+        step: 2,
+        steps: 3,
+        after_markdown: """
+        First **note**.
+
+        <!-- step -->
+
+        Second **note**.
+        """
+      )
+
+    assert first_markdown_step =~ "• One"
+    assert first_markdown_step =~ "• Two"
+    assert first_markdown_step =~ "First note."
+    refute first_markdown_step =~ "Second note."
+    assert first_markdown_step =~ "[more]"
+
+    second_markdown_step =
+      render_bullets!(
+        step: 3,
+        steps: 3,
+        after_markdown: """
+        First **note**.
+
+        <!-- step -->
+
+        Second **note**.
+        """
+      )
+
+    assert second_markdown_step =~ "First note."
+    assert second_markdown_step =~ "Second note."
+    refute second_markdown_step =~ "[more]"
+  end
+
   test "renders nested bullet items with their parent step" do
     raw_rendered =
       render_bullets_raw!(
@@ -125,6 +201,31 @@ defmodule EasyBreezy.Layouts.BulletsSlideTest do
 
     assert rendered =~ "│IO.puts(:ok)"
     assert_blank_line_between(rendered, "IO.puts(:ok)", "Hello World")
+  end
+
+  test "renders non-elixir trailing code fences across the full slide width" do
+    rendered =
+      render_bullets_raw!(
+        step: 2,
+        after_markdown: """
+        ```
+        \\e[<0;12;7M  # press
+        ```
+        """
+      )
+
+    line =
+      rendered
+      |> String.split("\n", trim: false)
+      |> Enum.find(&String.contains?(&1, "\\e[<0;12;7M"))
+
+    assert line != nil
+    assert line =~ "\e[48;2;31;70;98"
+
+    refute Regex.match?(
+             ~r/\e\[48;2;25;53;73;38;2;214;231;255m +\e\[0m\e\[48;2;25;53;73;38;2;\d+;\d+;\d+m│\e\[0m$/,
+             line
+           )
   end
 
   defp render_bullets!(opts) do

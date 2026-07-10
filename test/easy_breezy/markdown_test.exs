@@ -16,7 +16,12 @@ defmodule EasyBreezy.MarkdownTest do
       )
       |> strip_ansi()
 
-    assert String.split(rendered, "\n", trim: false) == [
+    rendered_lines =
+      rendered
+      |> String.split("\n", trim: false)
+      |> Enum.map(&String.trim_trailing/1)
+
+    assert rendered_lines == [
              "one",
              "",
              "",
@@ -47,6 +52,28 @@ defmodule EasyBreezy.MarkdownTest do
     assert rendered =~ "Termite"
     assert rendered =~ "\e[38;2;"
     assert strip_ansi(line) |> String.length() == 36
+  end
+
+  test "renders non-elixir fences full width" do
+    rendered =
+      EasyBreezy.Markdown.render(
+        """
+        ```text
+        alpha
+        ```
+        """,
+        24,
+        reset: "\e[48;2;25;53;73;38;2;214;231;255m",
+        theme_colors: %{
+          panel: {31, 70, 98},
+          text: {214, 231, 255}
+        }
+      )
+
+    [line] = String.split(rendered, "\n", trim: false)
+
+    assert rendered =~ "\e[48;2;31;70;98"
+    assert strip_ansi(line) |> String.length() == 24
   end
 
   test "detects markdown ending with a fenced code block" do

@@ -303,7 +303,7 @@ defmodule EasyBreezy.Deck.Markdown do
 
   defp payload_for(:code, meta, body, base_path) do
     path = Map.get(meta, :path) || Map.get(meta, :code_path)
-    source = Map.get(meta, :source) || code_source(path, body, base_path)
+    source = Map.get(meta, :source) || code_source(path, strip_notes(body), base_path)
     focus_steps = List.wrap(Map.get(meta, :focus))
 
     payload = %{
@@ -311,7 +311,8 @@ defmodule EasyBreezy.Deck.Markdown do
       code_language: Map.get(meta, :language) || Map.get(meta, :code_language) || "text",
       code_source: source,
       code_path: path,
-      code_focus_ranges: Map.get(meta, :code_focus_ranges) || []
+      code_focus_ranges: Map.get(meta, :code_focus_ranges) || [],
+      notes: Map.get(meta, :notes) || notes_from_body(body)
     }
 
     if focus_steps == [] do
@@ -660,10 +661,11 @@ defmodule EasyBreezy.Deck.Markdown do
   defp default_steps(:bullets, meta, body) do
     items = Map.get(meta, :items, bullet_items(body))
     after_markdown = Map.get(meta, :after_markdown) || after_bullets_markdown(body)
+    after_markdown_steps = step_marker_count(after_markdown || "")
 
     cond do
-      immediate_reveal?(Map.get(meta, :reveal)) -> 0
-      markdown_present?(after_markdown) and items != [] -> length(items)
+      immediate_reveal?(Map.get(meta, :reveal)) -> after_markdown_steps
+      markdown_present?(after_markdown) and items != [] -> length(items) + after_markdown_steps
       true -> max(length(items) - 1, 0)
     end
   end
@@ -739,7 +741,7 @@ defmodule EasyBreezy.Deck.Markdown do
 
   defp after_bullets_markdown(body) do
     body
-    |> strip_notes()
+    |> strip_notes(preserve_step_markers?: true)
     |> remove_leading_title()
     |> String.split("\n", trim: false)
     |> lines_after_last_bullet()
