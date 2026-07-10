@@ -25,7 +25,7 @@ defmodule EasyBreezy.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:breeze, github: "gazler/breeze"},
+      {:breeze, "0.4.0"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:lumis, "~> 0.5.0"},
       {:nimble_parsec, "~> 1.4"}
