@@ -26,6 +26,7 @@ defmodule EasyBreezy.MixProject do
   defp deps do
     [
       {:breeze, "0.4.0"},
+      {:back_breeze, path: "~/dev/breeze/back_breeze", override: true},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:lumis, "~> 0.5.0"},
       {:nimble_parsec, "~> 1.4"}

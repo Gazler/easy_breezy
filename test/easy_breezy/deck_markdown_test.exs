@@ -557,7 +557,8 @@ defmodule EasyBreezy.DeckMarkdownTest do
                    view: CounterView,
                    start_opts: [],
                    assigns: %{},
-                   breeze_class: "width-full height-full"
+                   breeze_class: "width-full height-full",
+                   notes: "Demonstrate the counter"
                  },
                  disable_transitions?: true
                }
@@ -570,6 +571,7 @@ defmodule EasyBreezy.DeckMarkdownTest do
              view: EasyBreezy.DeckMarkdownTest.CounterView
              disable-transitions: true
              ---
+             <!-- Demonstrate the counter -->
              """)
   end
 

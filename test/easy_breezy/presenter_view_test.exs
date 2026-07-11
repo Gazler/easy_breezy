@@ -188,6 +188,35 @@ defmodule EasyBreezy.PresenterViewTest do
     refute plain =~ "No notes for this slide."
   end
 
+  test "speaker notes render for breeze slides" do
+    deck =
+      Markdown.parse!("""
+      ---
+      layout: breeze
+      title: Counter Demo
+      view: EasyBreezy.PresenterViewTest.LivePreviewView
+      ---
+      <!-- Demonstrate the live counter -->
+      """)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert plain =~ "Speaker notes"
+    assert plain =~ "Demonstrate the live counter"
+    refute plain =~ "No notes for this slide."
+  end
+
   test "sync payload elapsed time uses the local presenter clock" do
     deck = text_deck()
 

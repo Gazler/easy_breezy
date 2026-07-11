@@ -394,7 +394,7 @@ defmodule EasyBreezy.Deck.Markdown do
     end
   end
 
-  defp payload_for(:breeze, meta, _body, _base_path) do
+  defp payload_for(:breeze, meta, body, _base_path) do
     %{
       title: Map.get(meta, :title),
       view: breeze_view!(Map.get(meta, :view) || Map.get(meta, :module)),
@@ -405,7 +405,8 @@ defmodule EasyBreezy.Deck.Markdown do
         Map.get(meta, :breeze_class) || Map.get(meta, :class) || "width-full height-full",
       breeze_style: Map.get(meta, :breeze_style) || Map.get(meta, :style),
       breeze_focusable: Map.get(meta, :breeze_focusable, Map.get(meta, :focusable, true)),
-      sync_live_state: Map.get(meta, :sync_live_state, true)
+      sync_live_state: Map.get(meta, :sync_live_state, true),
+      notes: Map.get(meta, :notes) || notes_from_body(body)
     }
   end
 

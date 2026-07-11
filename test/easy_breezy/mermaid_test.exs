@@ -29,6 +29,48 @@ defmodule EasyBreezy.MermaidTest do
              ])
   end
 
+  test "routes cycle-closing edges back to the top" do
+    source = """
+    flowchart TD
+      start[Start] --> middle[Middle]
+      middle --> finish[Finish]
+      finish --> start
+    """
+
+    assert render_ascii(source) ==
+             ascii_snapshot([
+               "                                ┌──────┐",
+               "                                │  ┌───▼───┐",
+               "                                │  │ Start │",
+               "                                │  └───┬───┘",
+               "                                │      │",
+               "                                │  ┌───▼────┐",
+               "                                │  │ Middle │",
+               "                                │  └───┬────┘",
+               "                                │      │",
+               "                                │  ┌───▼────┐",
+               "                                │  │ Finish │",
+               "                                │  └───┬────┘",
+               "                                └──────┘"
+             ])
+  end
+
+  test "adds vertical spacing around self-referencing edges" do
+    source = """
+    flowchart TD
+      start[Start] --> start
+    """
+
+    assert render_ascii(source) ==
+             ascii_snapshot([
+               "                                ┌──────┐",
+               "                                │  ┌───▼───┐",
+               "                                │  │ Start │",
+               "                                │  └───┬───┘",
+               "                                └──────┘"
+             ])
+  end
+
   test "returns a useful error for unsupported syntax" do
     assert {:error, message} = Mermaid.render("sequenceDiagram\nA->>B: hello", 48, 20)
 

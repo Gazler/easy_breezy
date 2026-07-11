@@ -145,15 +145,45 @@ defmodule EasyBreezy.Mermaid do
     do: %{node | class_name: node.class_name || existing.class_name}
 
   defp render_graph(%Graph{direction: :lr} = graph, width, ansi_restore) do
+    {forward_edges, _feedback_edges} = split_edges(graph.edges)
+    graph = %{graph | edges: forward_edges}
+
     graph
     |> layers()
     |> render_lr(graph, width, ansi_restore)
   end
 
   defp render_graph(graph, width, ansi_restore) do
-    graph
+    {forward_edges, feedback_edges} = split_edges(graph.edges)
+    layout_graph = %{graph | edges: forward_edges}
+
+    layout_graph
     |> layers()
-    |> render_td(graph, width, ansi_restore)
+    |> render_td(layout_graph, feedback_edges, width, ansi_restore)
+  end
+
+  defp split_edges(edges) do
+    Enum.reduce(edges, {[], []}, fn edge, {forward_edges, feedback_edges} ->
+      if edge.from == edge.to or reachable?(forward_edges, edge.to, edge.from) do
+        {forward_edges, feedback_edges ++ [edge]}
+      else
+        {forward_edges ++ [edge], feedback_edges}
+      end
+    end)
+  end
+
+  defp reachable?(edges, from, to), do: reachable?(edges, [from], to, MapSet.new())
+
+  defp reachable?(_edges, [], _to, _visited), do: false
+  defp reachable?(_edges, [to | _rest], to, _visited), do: true
+
+  defp reachable?(edges, [node | rest], to, visited) do
+    if MapSet.member?(visited, node) do
+      reachable?(edges, rest, to, visited)
+    else
+      next = for edge <- edges, edge.from == node, do: edge.to
+      reachable?(edges, rest ++ next, to, MapSet.put(visited, node))
+    end
   end
 
   defp layers(graph) do
@@ -179,7 +209,9 @@ defmodule EasyBreezy.Mermaid do
     |> Enum.map(fn {_rank, ids} -> ids end)
   end
 
-  defp render_td(layers, graph, width, ansi_restore) do
+  defp render_td(layers, graph, feedback_edges, width, ansi_restore) do
+    feedback_padding = if feedback_edges == [], do: 0, else: 1
+
     rendered_layers =
       Enum.map(layers, fn ids ->
         {node_lines, positions} = render_td_layer(ids, graph, width, ansi_restore)
@@ -187,31 +219,128 @@ defmodule EasyBreezy.Mermaid do
       end)
       |> align_td_layers(graph)
 
-    rendered_layers
+    {chunks, _next_row} =
+      rendered_layers
+      |> Enum.with_index()
+      |> Enum.map_reduce(feedback_padding, fn {layer, index}, row ->
+        previous = if index > 0, do: Enum.at(rendered_layers, index - 1)
+        next = Enum.at(rendered_layers, index + 1)
+
+        incoming_edges =
+          if previous, do: td_edges(previous.positions, layer.positions, graph), else: []
+
+        outgoing_edges = if next, do: td_edges(layer.positions, next.positions, graph), else: []
+
+        node_lines =
+          layer.lines
+          |> add_td_layer_arrows(layer.positions, incoming_edges)
+          |> add_td_layer_outgoing_joins(layer.positions, outgoing_edges)
+
+        connector_lines =
+          if next do
+            render_td_connectors(layer.positions, next.positions, graph, width)
+          else
+            []
+          end
+
+        lines = node_lines ++ connector_lines
+
+        chunk = %{
+          lines: lines,
+          node_top: row,
+          node_bottom: row + length(node_lines) - 1,
+          positions: layer.positions
+        }
+
+        {chunk, row + length(lines)}
+      end)
+
+    lines =
+      List.duplicate("", feedback_padding) ++
+        Enum.flat_map(chunks, & &1.lines) ++ List.duplicate("", feedback_padding)
+
+    render_td_feedback_edges(lines, chunks, feedback_edges, width)
+  end
+
+  defp render_td_feedback_edges(lines, _chunks, [], _width), do: lines
+
+  defp render_td_feedback_edges(lines, chunks, feedback_edges, width) do
+    node_positions =
+      for chunk <- chunks,
+          {id, position} <- chunk.positions,
+          into: %{},
+          do: {id, Map.merge(position, %{top: chunk.node_top, bottom: chunk.node_bottom})}
+
+    leftmost =
+      node_positions
+      |> Map.values()
+      |> Enum.map(& &1.left)
+      |> Enum.min(fn -> 0 end)
+
+    feedback_edges
     |> Enum.with_index()
-    |> Enum.flat_map(fn {layer, index} ->
-      previous = Enum.at(rendered_layers, index - 1)
-      next = Enum.at(rendered_layers, index + 1)
+    |> Enum.reduce(lines, fn {edge, index}, lines ->
+      with %{bottom: source_row, center: source_x} <- node_positions[edge.from],
+           %{top: target_row, center: target_x} <- node_positions[edge.to],
+           true <- source_row > target_row do
+        route_x = max(leftmost - 3 - index * 2, 0)
+        target_route_row = target_row - 1
+        source_route_row = source_row + 1
 
-      incoming_edges =
-        if previous, do: td_edges(previous.positions, layer.positions, graph), else: []
-
-      outgoing_edges = if next, do: td_edges(layer.positions, next.positions, graph), else: []
-
-      node_lines =
-        layer.lines
-        |> add_td_layer_arrows(layer.positions, incoming_edges)
-        |> add_td_layer_outgoing_joins(layer.positions, outgoing_edges)
-
-      connector_lines =
-        if next do
-          render_td_connectors(layer.positions, next.positions, graph, width)
-        else
-          []
-        end
-
-      node_lines ++ connector_lines
+        lines
+        |> pad_lines(width)
+        |> draw_feedback_vertical(route_x, target_route_row, source_route_row)
+        |> draw_feedback_target(route_x, target_x, target_row)
+        |> draw_feedback_source(route_x, source_x, source_row)
+        |> trim_line_ends()
+      else
+        _ -> lines
+      end
     end)
+  end
+
+  defp pad_lines(lines, width) do
+    Enum.map(lines, fn line ->
+      line
+      |> Kernel.<>(spaces(width - visible_length(line)))
+      |> String.graphemes()
+    end)
+  end
+
+  defp draw_feedback_vertical(lines, route_x, target_row, source_row) do
+    Enum.reduce((target_row + 1)..(source_row - 1), lines, fn row, lines ->
+      List.update_at(lines, row, &replace_connector_at(&1, route_x, "│"))
+    end)
+  end
+
+  defp draw_feedback_target(lines, route_x, target_x, target_row) do
+    lines
+    |> List.update_at(target_row - 1, fn line ->
+      line
+      |> put_feedback_horizontal_range(route_x, target_x)
+      |> replace_connector_at(route_x, "┌")
+      |> replace_connector_at(target_x, "┐")
+    end)
+    |> List.update_at(target_row, &replace_at(&1, target_x, "▼"))
+  end
+
+  defp draw_feedback_source(lines, route_x, source_x, source_row) do
+    lines
+    |> List.update_at(source_row, &replace_connector_at(&1, source_x, "┬"))
+    |> List.update_at(source_row + 1, fn line ->
+      line
+      |> put_feedback_horizontal_range(route_x, source_x)
+      |> replace_connector_at(route_x, "└")
+      |> replace_connector_at(source_x, "┘")
+    end)
+  end
+
+  defp put_feedback_horizontal_range(line, from, to) do
+    Enum.reduce(from..to, line, &replace_at(&2, &1, "─"))
+  end
+
+  defp trim_line_ends(lines) do
+    Enum.map(lines, fn line -> line |> Enum.join() |> String.trim_trailing() end)
   end
 
   defp render_td_layer(ids, graph, width, ansi_restore) do
