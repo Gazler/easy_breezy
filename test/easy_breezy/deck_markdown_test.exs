@@ -632,4 +632,25 @@ defmodule EasyBreezy.DeckMarkdownTest do
              ---
              """)
   end
+
+  test "parses breeze_focus for breeze slides" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :breeze,
+                 payload: %{
+                   breeze_focus: "languages"
+                 }
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: breeze
+             title: List Demo
+             view: EasyBreezy.DeckMarkdownTest.CounterView
+             breeze_focus: languages
+             ---
+             """)
+  end
 end

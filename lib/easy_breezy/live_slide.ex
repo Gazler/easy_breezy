@@ -53,7 +53,7 @@ defmodule EasyBreezy.LiveSlide do
     case id(slide) do
       id when is_binary(id) ->
         if sync?(slide) do
-          Breeze.View.focus(term, id)
+          Breeze.View.focus(term, focus_id(slide, id))
         else
           maybe_clear_focus(term, id)
         end
@@ -64,6 +64,21 @@ defmodule EasyBreezy.LiveSlide do
   end
 
   def focus(term, _slide), do: Breeze.View.focus(term, nil)
+
+  defp focus_id(%{payload: payload}, id) do
+    payload = normalize_payload(payload)
+
+    case Map.get(payload, :breeze_focus, Map.get(payload, "breeze_focus")) do
+      focus when is_binary(focus) and focus != "" ->
+        id <> "::" <> focus
+
+      focus when is_atom(focus) and focus not in [nil, false, true] ->
+        id <> "::" <> to_string(focus)
+
+      _other ->
+        id
+    end
+  end
 
   defp maybe_clear_focus(%{focused: focused} = term, id) when is_binary(focused) do
     if focused == id or String.starts_with?(focused, id <> "::") do

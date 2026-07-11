@@ -405,6 +405,7 @@ defmodule EasyBreezy.Deck.Markdown do
         Map.get(meta, :breeze_class) || Map.get(meta, :class) || "width-full height-full",
       breeze_style: Map.get(meta, :breeze_style) || Map.get(meta, :style),
       breeze_focusable: Map.get(meta, :breeze_focusable, Map.get(meta, :focusable, true)),
+      breeze_focus: Map.get(meta, :breeze_focus),
       sync_live_state: Map.get(meta, :sync_live_state, true),
       notes: Map.get(meta, :notes) || notes_from_body(body)
     }
