@@ -317,6 +317,42 @@ defmodule EasyBreezy.PresenterViewTest do
     assert overlay.content =~ "c=#{overlay.width},r=#{overlay.height}"
   end
 
+  test "next preview renders a full-image slide edge to edge" do
+    path = Path.join(System.tmp_dir!(), "easy_breezy_presenter_full_image.png")
+    File.write!(path, "preview-image")
+    deck = text_to_full_image_deck(path)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {120, 30},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+    Breeze.Test.render!(session)
+
+    assert {_module, state} = Breeze.Test.metadata(session).implicit_state["slide-image"]
+    assert state.active?
+    assert state.inset == 0
+    assert state.scope == "presenter-next:full"
+
+    {:ok, _acc, _box, decorations} = Breeze.ChildServer.render_snapshot(session.pid, [])
+    decoration = Enum.find(decorations, &(&1.id == "slide-image"))
+
+    assert {:ok, _box, overlays: [overlay]} =
+             decoration.mod.animate(:root, decoration.box, decoration.flags, decoration.state, %{
+               phase: :async,
+               frame: 0,
+               layout: decoration.layout
+             })
+
+    assert overlay.width == decoration.layout.width
+    assert overlay.height == decoration.layout.height
+  end
+
   test "next image preview keeps its image slot layout after a current live slide" do
     path = Path.join(System.tmp_dir!(), "easy_breezy_presenter_live_preview.img")
     File.write!(path, "preview-image")
@@ -479,6 +515,21 @@ defmodule EasyBreezy.PresenterViewTest do
           title: "Image",
           layout: :two_column,
           payload: Map.merge(text_payload("Image"), %{right_mode: :image, right_path: path})
+        }
+      ]
+    }
+  end
+
+  defp text_to_full_image_deck(path) do
+    %Deck{
+      title: "Presenter Test",
+      slides: [
+        %Slide{id: :intro, title: "Intro", layout: :bullets, payload: text_payload("Intro")},
+        %Slide{
+          id: :full_image,
+          title: "Full image",
+          layout: :image,
+          payload: %{path: path, alt: "Full image"}
         }
       ]
     }

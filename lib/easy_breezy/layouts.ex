@@ -6,6 +6,7 @@ defmodule EasyBreezy.Layouts do
   import EasyBreezy.Layouts.BulletsSlide
   import EasyBreezy.Layouts.BreezeSlide
   import EasyBreezy.Layouts.CodeSlide
+  import EasyBreezy.Layouts.ImageSlide
   import EasyBreezy.Layouts.MarkdownSlide
   import EasyBreezy.Layouts.PresenterSlide
   import EasyBreezy.Layouts.TitleSlide
@@ -75,6 +76,10 @@ defmodule EasyBreezy.Layouts do
               subtitle: nil,
               speaker: nil,
               footer: nil,
+              path: nil,
+              alt: nil,
+              width: nil,
+              height: nil,
               title_font: nil,
               font: nil,
               reveal: nil,
@@ -122,6 +127,16 @@ defmodule EasyBreezy.Layouts do
       after_markdown={@slide_payload.after_markdown}
       reveal={reveal(@slide_payload)}
       step={@step}
+      body_width={@body_width}
+      body_height={@body_height}
+      render_context={@render_context}
+    />
+    <.image_slide
+      :if={@slide.layout == :image}
+      path={@slide_payload.path}
+      alt={@slide_payload.alt}
+      width={@slide_payload.width}
+      height={@slide_payload.height}
       body_width={@body_width}
       body_height={@body_height}
       render_context={@render_context}

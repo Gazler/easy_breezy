@@ -13,6 +13,12 @@ footer: Struct decks still work too
 This deck is loaded from examples/markdown_slides.md.
 -->
 ---
+id: full_image
+layout: image
+title: Full-screen image
+---
+![Full-screen slide](image.png)
+---
 id: why
 layout: bullets
 title: Why Markdown?

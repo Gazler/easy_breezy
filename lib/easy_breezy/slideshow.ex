@@ -1125,6 +1125,7 @@ defmodule EasyBreezy.Slideshow do
     end
   end
 
+  defp image_slide?(%{layout: :image}), do: true
   defp image_slide?(%{id: :image}), do: true
   defp image_slide?(%{payload: payload}), do: image_payload?(payload)
   defp image_slide?(_slide), do: false

@@ -457,6 +457,41 @@ defmodule EasyBreezy.DeckMarkdownTest do
     assert right_path == "/tmp/deck/image.png"
   end
 
+  test "parses a full-image slide and resolves its asset path" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :image,
+                 payload: %{
+                   path: path,
+                   alt: "The missing feature",
+                   width: 72,
+                   height: 36,
+                   notes: "Reveal the SSH adapter next"
+                 },
+                 steps: 0,
+                 disable_transitions?: true
+               }
+             ]
+           } =
+             Markdown.parse!(
+               """
+               ---
+               layout: image
+               title: The missing feature
+               width: 72
+               height: 36
+               ---
+               ![Typing kitty](typing-kitty.png)
+
+               <!-- Reveal the SSH adapter next -->
+               """,
+               base_path: "/tmp/deck"
+             )
+
+    assert path == "/tmp/deck/typing-kitty.png"
+  end
+
   test "parses immediate reveal for split slides" do
     assert %Deck{
              slides: [

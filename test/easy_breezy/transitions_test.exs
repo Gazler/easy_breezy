@@ -2,6 +2,7 @@ defmodule EasyBreezy.TransitionsTest do
   use ExUnit.Case, async: true
 
   alias EasyBreezy.Transitions
+  alias EasyBreezy.Slide
 
   test "uses enough frames for small terminal transitions" do
     assert Transitions.transition_frames(74) == 16
@@ -23,5 +24,13 @@ defmodule EasyBreezy.TransitionsTest do
     total = frames * Transitions.transition_interval_ms(:forward, 20, frames)
 
     assert total in 380..420
+  end
+
+  test "disables transitions when either slide is a full image" do
+    image = %Slide{layout: :image}
+    text = %Slide{layout: :bullets}
+
+    refute Transitions.enabled?(image, text, :forward, :dark)
+    refute Transitions.enabled?(text, image, :forward, :dark)
   end
 end

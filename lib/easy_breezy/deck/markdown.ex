@@ -296,14 +296,14 @@ defmodule EasyBreezy.Deck.Markdown do
       payload: payload,
       steps: Map.get(payload_meta, :steps, default_steps(layout, payload_meta, body)),
       transition: Map.get(payload_meta, :transition, :slide),
-      disable_transitions?: disable_transitions?(payload_meta, payload)
+      disable_transitions?: disable_transitions?(layout, payload_meta, payload)
     }
   end
 
-  defp disable_transitions?(meta, payload) do
+  defp disable_transitions?(layout, meta, payload) do
     Enum.reduce_while(
       [:disable_transitions?, :disable_transitions, :hide_transition, :hide_transitions],
-      image_payload?(payload),
+      layout == :image or image_payload?(payload),
       fn key, default ->
         case Map.fetch(meta, key) do
           {:ok, value} -> {:halt, value}
@@ -369,6 +369,22 @@ defmodule EasyBreezy.Deck.Markdown do
     |> maybe_put(:reveal, Map.get(meta, :reveal))
     |> maybe_put(:after_markdown, after_markdown)
     |> Map.put_new(:notes, notes_from_body(body))
+  end
+
+  defp payload_for(:image, meta, body, base_path) do
+    path =
+      Map.get(meta, :path) ||
+        Map.get(meta, :image_path) ||
+        markdown_image_path(strip_notes(body), base_path)
+
+    %{
+      title: Map.get(meta, :title),
+      path: resolve_asset_path(path, base_path),
+      alt: Map.get(meta, :alt) || Map.get(meta, :title),
+      width: Map.get(meta, :width),
+      height: Map.get(meta, :height),
+      notes: Map.get(meta, :notes) || notes_from_body(body)
+    }
   end
 
   defp payload_for(:code, meta, body, base_path) do
@@ -571,6 +587,8 @@ defmodule EasyBreezy.Deck.Markdown do
     |> Enum.join("\n")
     |> String.trim()
   end
+
+  defp resolve_asset_path(nil, _base_path), do: nil
 
   defp resolve_asset_path(path, base_path) do
     cond do

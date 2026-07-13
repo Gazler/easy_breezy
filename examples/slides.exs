@@ -40,9 +40,12 @@ defmodule EasyBreezy.Examples.BreezeDeck do
         },
         %Slide{
           id: :image,
-          title: "Images",
-          layout: :two_column,
-          payload: &image_payload/2,
+          title: "Full-screen Image",
+          layout: :image,
+          payload: %{
+            path: Path.expand("image.png", __DIR__),
+            alt: "Full-screen image"
+          },
           steps: 0,
           transition: :slide,
           disable_transitions?: true
@@ -198,84 +201,6 @@ defmodule EasyBreezy.Examples.BreezeDeck do
         }
       ]
     }
-  end
-
-  defp image_payload(body_width, _step) do
-    left_width = max(div(body_width, 2) - 4, 16)
-    path = Path.expand("image.png", __DIR__)
-
-    %{
-      title: "Images",
-      left_lines:
-        image_text_lines(
-          "This uses the Kitty graphics protocol through Breeze overlays.",
-          path,
-          left_width
-        ),
-      right_mode: :image,
-      right_path: path
-    }
-  end
-
-  defp image_text_lines(caption, path, width) do
-    lines = [
-      {"text-secondary", "Ghostty/Kitty image experiment"},
-      {"", ""},
-      {"", caption},
-      {"", ""},
-      {"text-muted", "If your terminal ignores Kitty graphics, this slide falls back to text."},
-      {"text-muted", "Image path:"}
-    ]
-
-    wrapped_lines =
-      lines
-      |> Enum.flat_map(fn {class, text} ->
-        text
-        |> wrap_paragraph(width)
-        |> Enum.map(&{class, &1})
-      end)
-
-    wrapped_lines ++ Enum.map(wrap_code_line(path, width), &{"text-muted", &1})
-  end
-
-  defp wrap_code_line("", _width), do: [""]
-
-  defp wrap_code_line(line, width) do
-    line
-    |> String.graphemes()
-    |> Enum.chunk_every(max(width, 1))
-    |> Enum.map(&Enum.join/1)
-  end
-
-  defp wrap_paragraph("", _width), do: [""]
-
-  defp wrap_paragraph(text, width) do
-    text
-    |> String.split()
-    |> Enum.flat_map(fn word ->
-      if String.length(word) > max(width, 1), do: wrap_code_line(word, width), else: [word]
-    end)
-    |> wrap_words(max(width, 1))
-  end
-
-  defp wrap_words([], _width), do: []
-
-  defp wrap_words(words, width) do
-    {lines, current} =
-      Enum.reduce(words, {[], ""}, fn word, {lines, current} ->
-        cond do
-          current == "" ->
-            {lines, word}
-
-          String.length(current <> " " <> word) <= width ->
-            {lines, current <> " " <> word}
-
-          true ->
-            {[current | lines], word}
-        end
-      end)
-
-    Enum.reverse([current | lines])
   end
 end
 

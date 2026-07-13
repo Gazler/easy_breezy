@@ -119,6 +119,8 @@ defmodule EasyBreezy.Transitions do
 
   def enabled?(%{disable_transitions?: true}, _next_slide, _direction, _theme_mode), do: false
   def enabled?(_slide, %{disable_transitions?: true}, _direction, _theme_mode), do: false
+  def enabled?(%{layout: :image}, _next_slide, _direction, _theme_mode), do: false
+  def enabled?(_slide, %{layout: :image}, _direction, _theme_mode), do: false
   def enabled?(_slide, _next_slide, _direction, _theme_mode), do: true
 
   def transition_frames(body_width) when is_integer(body_width) do

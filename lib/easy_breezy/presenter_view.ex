@@ -543,6 +543,11 @@ defmodule EasyBreezy.PresenterView do
 
   defp image_slide_keys(nil), do: []
 
+  defp image_slide_keys(%{layout: :image} = slide) do
+    payload = resolve_slide_payload(slide, 80, 0)
+    [{:full, Map.get(payload, :path) || Map.get(payload, :image_path)}]
+  end
+
   defp image_slide_keys(slide) do
     slide
     |> resolve_slide_payload(80, 0)
