@@ -603,14 +603,38 @@ defmodule EasyBreezy.Layouts.CodeSlide do
 
   defp ansi_restore(theme_colors, background, foreground) when is_map(theme_colors) do
     case {Map.get(theme_colors, background), Map.get(theme_colors, foreground)} do
-      {{br, bg, bb}, {fr, fg, fb}} -> "\e[48;2;#{br};#{bg};#{bb};38;2;#{fr};#{fg};#{fb}m"
-      {{br, bg, bb}, _foreground} -> "\e[48;2;#{br};#{bg};#{bb}m"
-      {_background, {fr, fg, fb}} -> "\e[38;2;#{fr};#{fg};#{fb}m"
-      _other -> ""
+      {{br, bg, bb}, {fr, fg, fb}} ->
+        "\e[48;2;#{br};#{bg};#{bb};38;2;#{fr};#{fg};#{fb}m"
+
+      {{br, bg, bb}, _foreground} ->
+        "\e[48;2;#{br};#{bg};#{bb}m"
+
+      {_background, {fr, fg, fb}} ->
+        "\e[38;2;#{fr};#{fg};#{fb}m"
+
+      {background, foreground} when is_integer(background) and is_integer(foreground) ->
+        "\e[#{ansi_background(background)};#{ansi_foreground(foreground)}m"
+
+      {background, _foreground} when is_integer(background) ->
+        "\e[#{ansi_background(background)}m"
+
+      {_background, foreground} when is_integer(foreground) ->
+        "\e[#{ansi_foreground(foreground)}m"
+
+      _other ->
+        ""
     end
   end
 
   defp ansi_restore(_theme_colors, _background, _foreground), do: ""
+
+  defp ansi_foreground(color) when color in 0..7, do: 30 + color
+  defp ansi_foreground(color) when color in 8..15, do: 90 + color - 8
+  defp ansi_foreground(color), do: "38;5;#{color}"
+
+  defp ansi_background(color) when color in 0..7, do: 40 + color
+  defp ansi_background(color) when color in 8..15, do: 100 + color - 8
+  defp ansi_background(color), do: "48;5;#{color}"
 
   defp line_end_restore(line, body_width, theme_colors) do
     if visible_width(line) > body_width do

@@ -219,6 +219,32 @@ defmodule EasyBreezy.Layouts.MarkdownSlideTest do
     refute rendered =~ "<box"
   end
 
+  test "markdown slide breeze fences import typography components" do
+    deck =
+      Markdown.parse!("""
+      ---
+      layout: markdown
+      title: Typography
+      ---
+      ```breeze
+      <.h2>Type</.h2>
+      ```
+      """)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.Slideshow,
+        size: {84, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, themes: [:nebula], theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    rendered = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert rendered =~ "╺┳╸╻ ╻┏━┓┏━╸"
+  end
+
   test "markdown slides separate code fences from following breeze fences" do
     deck =
       Markdown.parse!("""

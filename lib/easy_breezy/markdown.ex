@@ -1,6 +1,7 @@
 defmodule EasyBreezy.Markdown do
   @moduledoc false
 
+  alias BackBreeze.TextSpan
   alias EasyBreezy.Layouts.CodeSlide
 
   @code "\e[36m"
@@ -108,7 +109,7 @@ defmodule EasyBreezy.Markdown do
   end
 
   defp render_block({:markdown, content}, width, _opts, reset) do
-    Breeze.Markdown.render(content, width, reset: reset)
+    render_breeze_markdown(content, width, reset)
   end
 
   defp render_block({:code_fence, lines}, width, opts, reset) do
@@ -216,14 +217,38 @@ defmodule EasyBreezy.Markdown do
 
   defp ansi_reset(theme_colors, background, foreground) when is_map(theme_colors) do
     case {Map.get(theme_colors, background), Map.get(theme_colors, foreground)} do
-      {{br, bg, bb}, {fr, fg, fb}} -> "\e[48;2;#{br};#{bg};#{bb};38;2;#{fr};#{fg};#{fb}m"
-      {{br, bg, bb}, _foreground} -> "\e[48;2;#{br};#{bg};#{bb}m"
-      {_background, {fr, fg, fb}} -> "\e[38;2;#{fr};#{fg};#{fb}m"
-      _other -> ""
+      {{br, bg, bb}, {fr, fg, fb}} ->
+        "\e[48;2;#{br};#{bg};#{bb};38;2;#{fr};#{fg};#{fb}m"
+
+      {{br, bg, bb}, _foreground} ->
+        "\e[48;2;#{br};#{bg};#{bb}m"
+
+      {_background, {fr, fg, fb}} ->
+        "\e[38;2;#{fr};#{fg};#{fb}m"
+
+      {background, foreground} when is_integer(background) and is_integer(foreground) ->
+        "\e[#{ansi_background(background)};#{ansi_foreground(foreground)}m"
+
+      {background, _foreground} when is_integer(background) ->
+        "\e[#{ansi_background(background)}m"
+
+      {_background, foreground} when is_integer(foreground) ->
+        "\e[#{ansi_foreground(foreground)}m"
+
+      _other ->
+        ""
     end
   end
 
   defp ansi_reset(_theme_colors, _background, _foreground), do: ""
+
+  defp ansi_foreground(color) when color in 0..7, do: 30 + color
+  defp ansi_foreground(color) when color in 8..15, do: 90 + color - 8
+  defp ansi_foreground(color), do: "38;5;#{color}"
+
+  defp ansi_background(color) when color in 0..7, do: 40 + color
+  defp ansi_background(color) when color in 8..15, do: 100 + color - 8
+  defp ansi_background(color), do: "48;5;#{color}"
 
   defp visible_width(content) do
     content
@@ -246,13 +271,58 @@ defmodule EasyBreezy.Markdown do
 
         item
         |> markdown_bullet_source()
-        |> Breeze.Markdown.render(max(width - indent, 1), reset: reset)
+        |> render_breeze_markdown(max(width - indent, 1), reset)
         |> indent_lines(indent)
       end)
       |> Enum.join("\n")
     else
-      Breeze.Markdown.render(Enum.join(lines, "\n"), width, reset: reset)
+      render_breeze_markdown(Enum.join(lines, "\n"), width, reset)
     end
+  end
+
+  defp render_breeze_markdown(content, width, reset) do
+    Code.ensure_loaded!(Breeze.Markdown)
+
+    rendered =
+      cond do
+        function_exported?(Breeze.Markdown, :render, 3) ->
+          apply(Breeze.Markdown, :render, [content, width, [reset: reset]])
+
+        function_exported?(Breeze.Markdown, :render, 2) ->
+          apply(Breeze.Markdown, :render, [content, width])
+      end
+
+    markdown_render_to_ansi(rendered, reset)
+  end
+
+  defp markdown_render_to_ansi(rendered, _reset) when is_binary(rendered), do: rendered
+
+  defp markdown_render_to_ansi(spans, reset) when is_list(spans) do
+    Enum.map_join(spans, fn
+      %TextSpan{text: text, style: style} ->
+        case style |> termite_style() |> Termite.Style.open_code() do
+          "" -> text
+          open_code -> open_code <> text <> reset
+        end
+
+      other ->
+        to_string(other)
+    end)
+  end
+
+  defp termite_style(style) do
+    Enum.reduce(style, %Termite.Style{}, fn
+      {:foreground_color, color}, acc -> Termite.Style.foreground(acc, color)
+      {:background_color, color}, acc -> Termite.Style.background(acc, color)
+      {:bold, true}, acc -> Termite.Style.bold(acc)
+      {:faint, true}, acc -> Termite.Style.faint(acc)
+      {:italic, true}, acc -> Termite.Style.italic(acc)
+      {:underline, true}, acc -> Termite.Style.underline(acc)
+      {:blink, true}, acc -> Termite.Style.blink(acc)
+      {:inverse, true}, acc -> Termite.Style.inverse(acc)
+      {:crossed_out, true}, acc -> Termite.Style.crossed_out(acc)
+      _style, acc -> acc
+    end)
   end
 
   defp root_bullet_line?(line) do

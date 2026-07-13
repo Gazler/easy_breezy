@@ -25,7 +25,7 @@ defmodule EasyBreezy.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:breeze, "0.4.0"},
+      {:breeze, path: "~/dev/breeze/breeze", override: true},
       {:back_breeze, path: "~/dev/breeze/back_breeze", override: true},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:lumis, "~> 0.5.0"},

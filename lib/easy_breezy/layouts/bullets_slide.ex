@@ -9,6 +9,12 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
 
   import Breeze.Blocks
   import EasyBreezy.Layouts.Helpers
+  import EasyBreezy.Typography
+
+  @breeze_components :text
+  @breeze_components :h1
+  @breeze_components :h2
+  @breeze_components :h3
 
   attr :title, :string, required: true
   attr :items, :list, required: true

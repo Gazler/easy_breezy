@@ -185,6 +185,20 @@ defmodule EasyBreezy.Layouts.BulletsSlideTest do
     refute rendered =~ "<box"
   end
 
+  test "trailing breeze fences import typography components" do
+    rendered =
+      render_bullets!(
+        step: 2,
+        after_markdown: """
+        ```breeze
+        <.text class="bold">Typography</.text>
+        ```
+        """
+      )
+
+    assert rendered =~ "Typography"
+  end
+
   test "separates trailing code fences from following breeze fences" do
     rendered =
       render_bullets!(

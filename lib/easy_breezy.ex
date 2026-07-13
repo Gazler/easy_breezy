@@ -50,6 +50,7 @@ defmodule EasyBreezy do
       :source_editor,
       :source_save_notice,
       :source_mode?,
+      :theme_status?,
       :themes
     ])
     |> Keyword.put(:presenter_mode, presenter_mode(opts))
@@ -192,6 +193,7 @@ defmodule EasyBreezy do
     |> maybe_put_assign(assigns, :source_editor)
     |> maybe_put_assign(assigns, :source_save_notice)
     |> maybe_put_assign(assigns, :source_mode?)
+    |> maybe_put_assign(assigns, :theme_status?)
     |> maybe_put_presenter(assigns)
     |> maybe_put_theme(assigns)
   end

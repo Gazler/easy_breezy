@@ -50,7 +50,8 @@ defmodule EasyBreezy.Slideshow do
         presenter_mode: Keyword.get(opts, :presenter_mode, :single),
         presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
         presenter_subscribers: MapSet.new(),
-        keybindings_bar?: Keyword.get(opts, :keybindings_bar?, true),
+        keybindings_bar?: Keyword.get(opts, :keybindings_bar?, false),
+        theme_status?: Keyword.get(opts, :theme_status?, false),
         source_editor: Keyword.get(opts, :source_editor),
         source_mode?: Keyword.get(opts, :source_mode?, false),
         live_state: %{},
@@ -103,7 +104,9 @@ defmodule EasyBreezy.Slideshow do
         <box class="height-1 inline bg-panel text">
           <box class="bold text-primary"> {@deck.title} </box>
           <box class="text-muted"> {@screen_width}x{@screen_height} </box>
-          <box class="text-muted"> {@theme_name}/{@actual_theme_mode} ({@theme_status}) </box>
+          <box :if={@theme_status?} class="text-muted">
+            {@theme_name}/{@actual_theme_mode} ({@theme_status})
+          </box>
           <box style="width-full" class="text-right">
             Slide {@visible_slide_index + 1}/{@total_slides} · Step {@visible_step + 1}/{@slide.steps + 1}
           </box>
@@ -151,6 +154,7 @@ defmodule EasyBreezy.Slideshow do
           <box> space advance </box>
           <box> g go to </box>
           <box class="text-muted"> ^t theme </box>
+          <box class="text-muted"> T theme info </box>
           <box style="width-full text-right"> q quit </box>
         </box>
         <box :if={@presenter?} class="height-1 inline bg-panel text">
@@ -234,6 +238,10 @@ defmodule EasyBreezy.Slideshow do
 
   def handle_event(_, %{"key" => "?"}, term) do
     {:noreply, assign(term, keybindings_bar?: not term.assigns.keybindings_bar?)}
+  end
+
+  def handle_event(_, %{"key" => "T"}, term) do
+    {:noreply, assign(term, theme_status?: not term.assigns.theme_status?)}
   end
 
   def handle_event(_, %{"key" => "i"}, term) do

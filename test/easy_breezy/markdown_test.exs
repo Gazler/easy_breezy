@@ -54,6 +54,27 @@ defmodule EasyBreezy.MarkdownTest do
     assert strip_ansi(line) |> String.length() == 36
   end
 
+  test "highlights elixir fences with a full-width system16 panel background" do
+    rendered =
+      EasyBreezy.Markdown.render(
+        """
+        ```elixir
+        EasyBreezy.run(theme: :system16)
+        ```
+        """,
+        40,
+        reset: "\e[100;37m",
+        theme_colors: %{panel: 0, surface: 8, text: 7},
+        code_theme: "github_dark_dimmed"
+      )
+
+    [line] = String.split(rendered, "\n", trim: false)
+
+    assert rendered =~ "\e[40;37m"
+    refute rendered =~ ~r/\e\[0m\e\[38/
+    assert strip_ansi(line) |> String.length() == 40
+  end
+
   test "renders non-elixir fences full width" do
     rendered =
       EasyBreezy.Markdown.render(
@@ -74,6 +95,15 @@ defmodule EasyBreezy.MarkdownTest do
 
     assert rendered =~ "\e[48;2;31;70;98"
     assert strip_ansi(line) |> String.length() == 24
+  end
+
+  test "renders Breeze markdown spans into the slide ANSI context" do
+    reset = "\e[48;2;25;53;73;38;2;214;231;255m"
+    rendered = EasyBreezy.Markdown.render("Before `code` after", 30, reset: reset)
+
+    assert strip_ansi(rendered) == "Before code after"
+    assert rendered =~ reset
+    assert rendered =~ "\e[36mcode"
   end
 
   test "detects markdown ending with a fenced code block" do

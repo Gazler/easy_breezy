@@ -96,16 +96,48 @@ defmodule EasyBreezy.SlideshowTest do
     session = start_session()
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert Breeze.Test.render!(session) =~ "space advance"
-
-    assert {:noreply, _focused, true} = Breeze.Test.input(session, "?")
     rendered = Breeze.Test.render!(session)
-
     refute rendered =~ "space advance"
     assert rendered |> strip_ansi() |> rendered_lines() |> List.last() |> String.starts_with?("└")
 
     assert {:noreply, _focused, true} = Breeze.Test.input(session, "?")
+    rendered = Breeze.Test.render!(session)
+    assert rendered =~ "space advance"
+    assert rendered =~ "T theme info"
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "?")
+    refute Breeze.Test.render!(session) =~ "space advance"
+  end
+
+  test "the keybindings bar can be shown initially" do
+    session = start_session(start_opts: [keybindings_bar?: true])
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
     assert Breeze.Test.render!(session) =~ "space advance"
+  end
+
+  test "the header theme status is opt-in" do
+    session = start_session()
+    visible_session = start_session(start_opts: [theme_status?: true])
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+    on_exit(fn -> Breeze.Test.stop(visible_session) end)
+
+    refute session |> Breeze.Test.render!() |> strip_ansi() =~ "nebula/custom (ready)"
+    assert visible_session |> Breeze.Test.render!() |> strip_ansi() =~ "nebula/custom (ready)"
+  end
+
+  test "T toggles the header theme status" do
+    session = start_session()
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    refute session |> Breeze.Test.render!() |> strip_ansi() =~ "nebula/custom (ready)"
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "T")
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "nebula/custom (ready)"
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "T")
+    refute session |> Breeze.Test.render!() |> strip_ansi() =~ "nebula/custom (ready)"
   end
 
   test "escape does not close the slideshow" do
@@ -191,6 +223,26 @@ defmodule EasyBreezy.SlideshowTest do
              )
 
     assert Keyword.fetch!(start_opts, :source_save_notice) == notice
+  end
+
+  test "passes the header theme status option through to the slideshow" do
+    assert [start_opts: start_opts] =
+             EasyBreezy.refresh_server_opts(
+               [deck: fn -> deck() end, theme_status?: true],
+               %{}
+             )
+
+    assert Keyword.fetch!(start_opts, :theme_status?)
+  end
+
+  test "preserves toggled header theme status through refreshed server options" do
+    assert [start_opts: start_opts] =
+             EasyBreezy.refresh_server_opts(
+               [deck: fn -> deck() end, theme_status?: false],
+               %{metadata: %{assigns: %{theme_status?: true}}}
+             )
+
+    assert Keyword.fetch!(start_opts, :theme_status?)
   end
 
   test ":q leaves the editor and returns to the rendered slide" do

@@ -8,6 +8,12 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
   alias EasyBreezy.Markdown, as: MarkdownRenderer
 
   import Breeze.Blocks
+  import EasyBreezy.Typography
+
+  @breeze_components :text
+  @breeze_components :h1
+  @breeze_components :h2
+  @breeze_components :h3
 
   attr :slide_id, :any, required: true
   attr :title, :string, default: nil
