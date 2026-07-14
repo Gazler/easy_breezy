@@ -58,6 +58,26 @@ defmodule EasyBreezy.DeckMarkdownTest do
              """)
   end
 
+  test "builds slides from canonicalized validator metadata" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :two_column,
+                 transition: :slide_up,
+                 disable_transitions?: false
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: split
+             transition: slide-up
+             hide_transitions: false
+             ---
+             Left
+             """)
+  end
+
   test "parses code slides with focus ranges" do
     assert %Deck{
              slides: [

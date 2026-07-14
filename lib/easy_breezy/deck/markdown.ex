@@ -4,12 +4,12 @@ defmodule EasyBreezy.Deck.Markdown do
   alias EasyBreezy.{Deck, Slide}
   alias EasyBreezy.Deck.Markdown.LineParser
   alias EasyBreezy.Deck.Parser
+  alias EasyBreezy.Deck.Validator
 
   def parse!(source, opts \\ []) when is_binary(source) do
-    parsed = Parser.parse!(source)
+    parsed = source |> Parser.parse!() |> Validator.validate!()
 
     parsed.entries
-    |> Enum.map(&coerce_entry/1)
     |> build_deck(Keyword.put(opts, :source, parsed.source))
   end
 
@@ -20,79 +20,7 @@ defmodule EasyBreezy.Deck.Markdown do
     |> Enum.reverse()
   end
 
-  defp coerce_entry(%{frontmatter: frontmatter} = entry) do
-    metadata =
-      Map.new(frontmatter, fn %{key: key, value: value} ->
-        key = key |> normalize_key() |> String.to_atom()
-        {key, parse_value(key, value)}
-      end)
-
-    entry
-    |> Map.delete(:frontmatter)
-    |> Map.put(:meta, metadata)
-  end
-
   defp normalize_key(key), do: String.replace(key, "-", "_")
-
-  defp parse_value(key, value) do
-    value = String.trim(value)
-
-    cond do
-      value == "" -> ""
-      value in ["true", "false"] -> value == "true"
-      value in ["nil", "null"] -> nil
-      integer?(value) -> String.to_integer(value)
-      quoted?(value) -> unquote_string(value)
-      list?(value) -> parse_list(value)
-      range?(value) -> parse_range(value)
-      String.starts_with?(value, ":") -> value |> String.trim_leading(":") |> String.to_atom()
-      atom_key?(key) and atom?(value) -> String.to_atom(value)
-      true -> value
-    end
-  end
-
-  defp parse_value(value), do: parse_value(nil, value)
-
-  defp integer?(value), do: String.match?(value, ~r/^-?\d+$/)
-  defp quoted?(value), do: String.match?(value, ~r/^(['"]).*\1$/)
-  defp list?(value), do: String.starts_with?(value, "[") and String.ends_with?(value, "]")
-  defp range?(value), do: String.match?(value, ~r/^\d+\.\.\d+$/)
-  defp atom?(value), do: String.match?(value, ~r/^[a-z_][a-zA-Z0-9_]*$/)
-
-  defp atom_key?(key) do
-    key in [
-      :id,
-      :layout,
-      :transition,
-      :theme,
-      :left_mode,
-      :right_mode,
-      :reveal
-    ]
-  end
-
-  defp unquote_string(value), do: value |> String.slice(1..-2//1) |> unescape_string()
-  defp unescape_string(value), do: String.replace(value, ~S(\"), ~S("))
-
-  defp parse_list(value) do
-    value
-    |> String.slice(1..-2//1)
-    |> split_list_items()
-    |> Enum.map(&parse_value/1)
-  end
-
-  defp split_list_items(""), do: []
-
-  defp split_list_items(value) do
-    value
-    |> String.split(",", trim: true)
-    |> Enum.map(&String.trim/1)
-  end
-
-  defp parse_range(value) do
-    [first, last] = String.split(value, "..", parts: 2)
-    {String.to_integer(first), String.to_integer(last)}
-  end
 
   defp build_deck(entries, opts) do
     {deck_meta, slide_entries} = split_deck_meta(entries)
@@ -122,7 +50,7 @@ defmodule EasyBreezy.Deck.Markdown do
   defp first_slide_title(_slides), do: nil
 
   defp build_slide(%{meta: meta, body: body} = entry, index, base_path) do
-    layout = meta |> Map.get(:layout, :markdown) |> normalize_layout()
+    layout = Map.fetch!(meta, :layout)
     title = Map.get(meta, :title) || infer_title(body) || "Slide #{index}"
     payload_meta = Map.put(meta, :title, title)
     payload = payload_for(layout, payload_meta, body, base_path)
@@ -135,40 +63,24 @@ defmodule EasyBreezy.Deck.Markdown do
       source_range: Map.get(entry, :source_range),
       payload: payload,
       steps: Map.get(payload_meta, :steps, default_steps(layout, payload_meta, body)),
-      transition: Map.get(payload_meta, :transition, :slide),
+      transition: Map.fetch!(payload_meta, :transition),
       disable_transitions?: disable_transitions?(layout, payload_meta, payload)
     }
   end
 
   defp disable_transitions?(layout, meta, payload) do
-    Enum.reduce_while(
-      [:disable_transitions?, :disable_transitions, :hide_transition, :hide_transitions],
-      layout == :image or image_payload?(payload),
-      fn key, default ->
-        case Map.fetch(meta, key) do
-          {:ok, value} -> {:halt, value}
-          :error -> {:cont, default}
-        end
-      end
-    )
-  end
+    key =
+      Enum.find(
+        [:disable_transitions?, :disable_transitions, :hide_transition, :hide_transitions],
+        &Map.has_key?(meta, &1)
+      )
 
-  defp normalize_layout(value) when is_binary(value) do
-    case value do
-      "two-column" -> :two_column
-      "two_column" -> :two_column
-      "two-cols" -> :two_column
-      "split" -> :two_column
-      "breeze" -> :breeze
-      "breeze-view" -> :breeze
-      "breeze_view" -> :breeze
-      "live" -> :breeze
-      "view" -> :breeze
-      layout -> String.to_atom(layout)
+    if key do
+      Map.fetch!(meta, key)
+    else
+      layout == :image or image_payload?(payload)
     end
   end
-
-  defp normalize_layout(value), do: value
 
   defp image_payload?(%{left_mode: mode}) when mode in [:image, "image"], do: true
   defp image_payload?(%{right_mode: mode}) when mode in [:image, "image"], do: true
