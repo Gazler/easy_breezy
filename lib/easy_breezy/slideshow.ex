@@ -14,6 +14,7 @@ defmodule EasyBreezy.Slideshow do
   alias Breeze.Theme
 
   @themes Theme.default_cycle()
+  @presenter_registry_retry_ms 50
   # Breeze's direct server input path leaves CSI-u Escape as "27u".
   @escape_keys ["Escape", "Esc", "\e", "27u"]
   @live_slide_movement_keys [
@@ -51,8 +52,6 @@ defmodule EasyBreezy.Slideshow do
         screen_height: screen_height,
         presenter?: Keyword.get(opts, :presenter, false),
         presenter_mode: Keyword.get(opts, :presenter_mode, :single),
-        presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
-        presenter_subscribers: MapSet.new(),
         keybindings_bar?: Keyword.get(opts, :keybindings_bar?, false),
         theme_status?: Keyword.get(opts, :theme_status?, false),
         source_editor: Keyword.get(opts, :source_editor),
@@ -66,7 +65,7 @@ defmodule EasyBreezy.Slideshow do
       )
       |> assign_theme_context()
       |> maybe_put_scroll_keybindings()
-      |> maybe_register_presentation()
+      |> maybe_register_presentation(opts)
       |> maybe_restore_source_save_flash(opts)
       |> maybe_publish_presentation_soon()
 
@@ -344,6 +343,17 @@ defmodule EasyBreezy.Slideshow do
     {:noreply, term, invalidate: false}
   end
 
+  def handle_info(
+        {:timeout, ref, :presenter_registry_retry},
+        %{assigns: %{presenter_registry_retry_ref: ref}} = term
+      ) do
+    term = assign(term, presenter_registry_retry_ref: nil)
+    {:noreply, register_presentation(term), invalidate: false}
+  end
+
+  def handle_info({:timeout, _ref, :presenter_registry_retry}, term),
+    do: {:noreply, term, invalidate: false}
+
   def handle_info({:easy_breezy_presenter_subscribe, pid}, term) when is_pid(pid) do
     Process.monitor(pid)
 
@@ -381,6 +391,18 @@ defmodule EasyBreezy.Slideshow do
     if id == visible_live_slide_id(term.assigns) do
       publish_presentation(term, nil)
     end
+
+    {:noreply, term, invalidate: false}
+  end
+
+  def handle_info(
+        {:DOWN, ref, :process, _pid, _reason},
+        %{assigns: %{presenter_registry_monitor_ref: ref}} = term
+      ) do
+    term =
+      term
+      |> assign(presenter_registry_monitor_ref: nil)
+      |> schedule_presentation_registration()
 
     {:noreply, term, invalidate: false}
   end
@@ -546,12 +568,48 @@ defmodule EasyBreezy.Slideshow do
 
   defp resolve_code_payload_for_steps(payload, _body_width), do: payload
 
-  defp maybe_register_presentation(%{assigns: %{presenter_mode: :presentation}} = term) do
-    EasyBreezy.PresenterSync.register(term.assigns.presenter_sync_name)
+  defp maybe_register_presentation(%{assigns: %{presenter_mode: :presentation}} = term, opts) do
     term
+    |> assign(
+      presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
+      presenter_subscribers: MapSet.new(),
+      presenter_registry_monitor_ref: nil,
+      presenter_registry_retry_ref: nil
+    )
+    |> register_presentation()
   end
 
-  defp maybe_register_presentation(term), do: term
+  defp maybe_register_presentation(term, _opts), do: term
+
+  defp register_presentation(%{assigns: %{presenter_registry_monitor_ref: ref}} = term)
+       when is_reference(ref),
+       do: term
+
+  defp register_presentation(term) do
+    case EasyBreezy.PresenterSync.register(term.assigns.presenter_sync_name) do
+      {:ok, registry} ->
+        if is_reference(term.assigns.presenter_registry_retry_ref) do
+          Process.cancel_timer(term.assigns.presenter_registry_retry_ref)
+        end
+
+        assign(term,
+          presenter_registry_monitor_ref: Process.monitor(registry),
+          presenter_registry_retry_ref: nil
+        )
+
+      {:error, _reason} ->
+        schedule_presentation_registration(term)
+    end
+  end
+
+  defp schedule_presentation_registration(%{assigns: %{presenter_registry_retry_ref: ref}} = term)
+       when is_reference(ref),
+       do: term
+
+  defp schedule_presentation_registration(term) do
+    ref = :erlang.start_timer(@presenter_registry_retry_ms, self(), :presenter_registry_retry)
+    assign(term, presenter_registry_retry_ref: ref)
+  end
 
   defp maybe_put_scroll_keybindings(%{assigns: %{presenter_mode: :presentation}} = term) do
     put_local_keybindings(term, scroll_keybindings())
@@ -581,17 +639,24 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp maybe_publish_presentation_soon(%{assigns: %{presenter_mode: :presentation}} = term) do
-    send(self(), :publish_presentation_state)
+    if presenter_subscribed?(term.assigns) do
+      send(self(), :publish_presentation_state)
+    end
+
     term
   end
 
   defp maybe_publish_presentation_soon(term), do: term
 
   defp maybe_publish_presentation(%{assigns: %{presenter_mode: :presentation}} = term) do
-    if request_server_live_snapshot(term) == :requested do
-      :ok
+    if presenter_subscribed?(term.assigns) do
+      if request_server_live_snapshot(term) == :requested do
+        :ok
+      else
+        publish_presentation(term, presentation_live_snapshot(term))
+      end
     else
-      publish_presentation(term, presentation_live_snapshot(term))
+      :ok
     end
   end
 
@@ -610,7 +675,7 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp maybe_publish_after_render(%{presenter_mode: :presentation} = assigns) do
-    if assigns.presenter_subscribers |> ensure_map_set() |> MapSet.size() > 0 do
+    if presenter_subscribed?(assigns) do
       send(self(), :publish_presentation_state)
     end
 
@@ -618,6 +683,10 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp maybe_publish_after_render(assigns), do: assigns
+
+  defp presenter_subscribed?(assigns) do
+    assigns.presenter_subscribers |> ensure_map_set() |> MapSet.size() > 0
+  end
 
   defp presentation_payload(term, live_snapshot) do
     assigns = term.assigns

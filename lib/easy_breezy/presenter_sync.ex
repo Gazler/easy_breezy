@@ -1,6 +1,8 @@
 defmodule EasyBreezy.PresenterSync do
   @moduledoc false
 
+  alias EasyBreezy.PresenterSync.Scope
+
   @default_name {:easy_breezy, :presentation}
 
   def group(name \\ @default_name), do: {__MODULE__, :presentations, name}
@@ -24,13 +26,21 @@ defmodule EasyBreezy.PresenterSync do
   end
 
   def register(name) do
-    ensure_registry_started()
-    :pg.join(group(name), self())
+    case Process.whereis(Scope.name()) do
+      pid when is_pid(pid) ->
+        case :pg.join(Scope.name(), group(name), self()) do
+          :ok -> {:ok, pid}
+          {:error, reason} -> {:error, reason}
+        end
+
+      nil ->
+        {:error, :not_started}
+    end
+  catch
+    :exit, _reason -> {:error, :not_started}
   end
 
   def whereis(name) do
-    ensure_registry_started()
-
     case presentation_members(name) do
       [] ->
         maybe_connect_default_presentation_node()
@@ -79,10 +89,16 @@ defmodule EasyBreezy.PresenterSync do
   end
 
   defp presentation_members(name) do
-    case :pg.get_members(group(name)) do
-      members when is_list(members) -> members
-      _ -> []
+    if Process.whereis(Scope.name()) do
+      case :pg.get_members(Scope.name(), group(name)) do
+        members when is_list(members) -> members
+        _ -> []
+      end
+    else
+      []
     end
+  catch
+    :exit, _reason -> []
   end
 
   defp maybe_connect_default_presentation_node do
@@ -109,19 +125,6 @@ defmodule EasyBreezy.PresenterSync do
           [_node_name, host] when host != "" -> String.to_atom("slides@" <> host)
           _ -> nil
         end
-    end
-  end
-
-  defp ensure_registry_started do
-    case Process.whereis(:pg) do
-      nil ->
-        case :pg.start_link() do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-        end
-
-      _pid ->
-        :ok
     end
   end
 end

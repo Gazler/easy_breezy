@@ -1,7 +1,7 @@
 defmodule EasyBreezy.SlideshowTest do
   use ExUnit.Case, async: false
 
-  alias EasyBreezy.{Deck, Slide}
+  alias EasyBreezy.{Deck, PresenterSync, Slide}
 
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
@@ -146,6 +146,39 @@ defmodule EasyBreezy.SlideshowTest do
 
     assert {:noreply, _focused, false} = Breeze.Test.input(session, "Escape")
     assert Process.alive?(session.pid)
+  end
+
+  test "presenter synchronization state is only assigned in presentation mode" do
+    session = start_session()
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assigns = Breeze.Test.metadata(session).assigns
+
+    refute Map.has_key?(assigns, :presenter_sync_name)
+    refute Map.has_key?(assigns, :presenter_subscribers)
+    refute Map.has_key?(assigns, :presenter_registry_monitor_ref)
+    refute Map.has_key?(assigns, :presenter_registry_retry_ref)
+  end
+
+  test "a presentation registers again when the supervised registry restarts" do
+    sync_name = {__MODULE__, :registry_restart, System.unique_integer([:positive, :monotonic])}
+
+    session =
+      start_session(start_opts: [presenter_mode: :presentation, sync_name: sync_name])
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert eventually(fn -> PresenterSync.whereis(sync_name) == session.pid end)
+
+    old_registry = Process.whereis(EasyBreezy.PresenterSync.Scope)
+    Process.exit(old_registry, :kill)
+
+    assert eventually(fn ->
+             registry = Process.whereis(EasyBreezy.PresenterSync.Scope)
+
+             is_pid(registry) and registry != old_registry and
+               PresenterSync.whereis(sync_name) == session.pid
+           end)
   end
 
   test "the presenter reset command restarts the presentation timer" do
@@ -446,6 +479,19 @@ defmodule EasyBreezy.SlideshowTest do
       assert {:noreply, _focused, _changed?} = Breeze.Test.input(session, key)
     end)
   end
+
+  defp eventually(fun, attempts \\ 40)
+
+  defp eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      true
+    else
+      Process.sleep(25)
+      eventually(fun, attempts - 1)
+    end
+  end
+
+  defp eventually(_fun, 0), do: false
 
   defp start_session(opts) do
     deck = Keyword.get(opts, :deck, deck())
