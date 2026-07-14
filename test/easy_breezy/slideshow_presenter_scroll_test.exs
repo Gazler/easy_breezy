@@ -22,6 +22,14 @@ defmodule EasyBreezy.SlideshowPresenterScrollTest do
     Breeze.Test.render!(session)
 
     assert scroll_offset(session, "slide-bullets") == 0
+    Breeze.Test.info(session, {:easy_breezy_presenter_subscribe, self()})
+
+    Breeze.Test.info(
+      session,
+      {:easy_breezy_presenter_command, self(), {:scroll, %{"key" => "PageDown"}}}
+    )
+
+    assert scroll_offset(session, "slide-bullets") == 0
 
     Breeze.Test.info(
       session,

@@ -52,7 +52,7 @@ defmodule EasyBreezy.SlideshowTransitionTest do
         shimmer_state.frozen_now
       )
 
-    send(session.pid, :transition_tick)
+    tick_transition(session)
     _rendered = Breeze.Test.render!(session)
 
     next_metadata = Breeze.Test.metadata(session)
@@ -103,7 +103,7 @@ defmodule EasyBreezy.SlideshowTransitionTest do
     assert map_size(transition.code_slide_snapshots) == 1
 
     for _ <- 1..div(transition.frames, 2) do
-      send(session.pid, :transition_tick)
+      tick_transition(session)
     end
 
     assert_snapshot(Breeze.Test.render!(session), "easy_breezy/code_slide_transition.ansi")
@@ -145,6 +145,33 @@ defmodule EasyBreezy.SlideshowTransitionTest do
     assert snapshot.target_scroll_y == 16
   end
 
+  test "cancels a transition and ignores its queued ticks when jumping" do
+    session =
+      Breeze.Test.start!(EasyBreezy.Slideshow,
+        size: {80, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: transition_deck(), themes: [:nebula], theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    _initial_render = Breeze.Test.render!(session)
+
+    assert {:noreply, _focused, true} =
+             Breeze.Test.event(session, nil, %{"key" => "ArrowRight"})
+
+    assert %{id: transition_id, timer_ref: timer_ref} =
+             Breeze.Test.metadata(session).assigns.transition
+
+    assert is_reference(timer_ref)
+
+    assert {:noreply, _focused, true} = Breeze.Test.event(session, nil, %{"key" => "Home"})
+    assert is_nil(Breeze.Test.metadata(session).assigns.transition)
+
+    send(session.pid, {:transition_tick, transition_id})
+    assert is_nil(Breeze.Test.metadata(session).assigns.transition)
+  end
+
   defp title_gradient(implicit_state) do
     Enum.find(implicit_state, fn
       {"title-gradient-" <> _, {EasyBreezy.Implicit.TitleGradient, _state}} -> true
@@ -157,6 +184,13 @@ defmodule EasyBreezy.SlideshowTransitionTest do
       {"footer-shimmer-" <> _, {EasyBreezy.Implicit.TextShimmer, _state}} -> true
       _other -> nil
     end)
+  end
+
+  defp tick_transition(session) do
+    case Breeze.Test.metadata(session).assigns.transition do
+      %{id: id} -> send(session.pid, {:transition_tick, id})
+      nil -> :ok
+    end
   end
 
   defp transition_deck do

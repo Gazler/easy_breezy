@@ -19,7 +19,6 @@ defmodule EasyBreezy.PresenterView do
   @retry_ms 1_000
   @resubscribe_ms 50
   @clock_tick_ms 1_000
-  @live_snapshot_tick_ms 100
   @live_slide_movement_keys [
     "ArrowUp",
     "ArrowDown",
@@ -57,7 +56,6 @@ defmodule EasyBreezy.PresenterView do
         presentation_screen_height: nil,
         live_state: %{},
         live_snapshot: nil,
-        live_snapshot_poll_ref: nil,
         presentation_monitor_ref: nil,
         presentation_pid: nil,
         sync_name: sync_name,
@@ -414,19 +412,6 @@ defmodule EasyBreezy.PresenterView do
     {:noreply, assign(term, elapsed_label: ElapsedTime.label(term.assigns.started_at_ms))}
   end
 
-  def handle_info(:live_snapshot_poll, term) do
-    term = assign(term, live_snapshot_poll_ref: nil)
-
-    if current_synced_live_slide?(term.assigns) do
-      case EasyBreezy.PresenterSync.request_state(term.assigns.sync_name, self()) do
-        :ok -> {:noreply, schedule_live_snapshot_poll(term), invalidate: false}
-        :error -> {:noreply, term, invalidate: false}
-      end
-    else
-      {:noreply, term, invalidate: false}
-    end
-  end
-
   def handle_info({:easy_breezy_presentation_state, payload}, term) when is_map(payload) do
     theme_name = Map.get(payload, :theme_name, term.assigns.theme_name)
     deck = Map.get(payload, :deck, term.assigns.deck)
@@ -464,7 +449,6 @@ defmodule EasyBreezy.PresenterView do
       |> PresenterScroll.import(Map.get(payload, :scroll_state))
       |> focus_current_live_slide()
       |> maybe_delete_presenter_image_overlay(previous_term)
-      |> schedule_live_snapshot_poll()
       |> maybe_put_source_saved_flash(source_saved?, deck)
 
     {:noreply, term}
@@ -666,19 +650,6 @@ defmodule EasyBreezy.PresenterView do
 
       true ->
         nil
-    end
-  end
-
-  defp schedule_live_snapshot_poll(%{assigns: %{live_snapshot_poll_ref: ref}} = term)
-       when is_reference(ref),
-       do: term
-
-  defp schedule_live_snapshot_poll(term) do
-    if current_synced_live_slide?(term.assigns) do
-      ref = Process.send_after(self(), :live_snapshot_poll, @live_snapshot_tick_ms)
-      assign(term, live_snapshot_poll_ref: ref)
-    else
-      term
     end
   end
 

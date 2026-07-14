@@ -83,6 +83,63 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
     assert payload.elapsed_ms >= 0
   end
 
+  test "presentation pushes autonomous live updates without presenter polling" do
+    presentation = start_presentation(deck())
+    on_exit(fn -> Breeze.Test.stop(presentation) end)
+
+    Breeze.Test.render!(presentation)
+    Breeze.Test.info(presentation, {:easy_breezy_presenter_subscribe, self()})
+    assert wait_for_payload(fn payload -> snapshot_content(payload) =~ "value: 0" end)
+
+    %{pid: child} = :sys.get_state(presentation.pid).children["breeze-slide-counter"]
+    assert {:noreply, _focused, _changed?} = Breeze.ChildServer.dispatch_input(child, "c")
+
+    assert wait_for_payload(fn payload -> snapshot_content(payload) =~ "value: 1" end)
+  end
+
+  test "serializes server snapshots and recovers timed-out requests" do
+    {presentation, snapshot_server} = start_fake_server_presentation(deck())
+    other_presenter = spawn(fn -> Process.sleep(:infinity) end)
+
+    on_exit(fn ->
+      Breeze.Test.stop(presentation)
+      Process.exit(snapshot_server, :kill)
+      Process.exit(other_presenter, :kill)
+    end)
+
+    assert :sys.get_state(presentation.pid).server == snapshot_server
+    assert Process.alive?(snapshot_server)
+
+    Breeze.Test.render!(presentation)
+    Breeze.Test.info(presentation, {:easy_breezy_presenter_subscribe, self()})
+
+    assert_receive {:snapshot_request, ^snapshot_server, slide_id, recipient, first_ref}
+    assert recipient == presentation.pid
+
+    Breeze.Test.info(presentation, {:easy_breezy_presenter_subscribe, other_presenter})
+    Breeze.Test.info(presentation, {:easy_breezy_presenter_state_request, self()})
+    refute_receive {:snapshot_request, ^snapshot_server, _, _, _}, 50
+
+    sync = Breeze.Test.metadata(presentation).assigns.presenter_live_sync
+    assert sync.request.ref == first_ref
+    assert sync.publish_pending?
+
+    Breeze.Test.info(
+      presentation,
+      {:breeze_live_snapshot, first_ref, slide_id,
+       {:ok, %{id: slide_id, content: "first", width: 74, height: 18}}}
+    )
+
+    assert_receive {:snapshot_request, ^snapshot_server, ^slide_id, ^recipient, second_ref}
+    refute second_ref == first_ref
+
+    Breeze.Test.info(presentation, {:presenter_snapshot_timeout, second_ref})
+
+    sync = Breeze.Test.metadata(presentation).assigns.presenter_live_sync
+    assert sync.request == nil
+    assert is_reference(sync.refresh_ref)
+  end
+
   test "presenter renders the presentation live snapshot and forwards regular input" do
     {presentation, presenter} = start_pair(deck())
 
@@ -115,7 +172,7 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
       Breeze.Test.stop(presentation)
     end)
 
-    assert render_plain(presenter) =~ "Live Slide"
+    assert eventually(fn -> render_plain(presenter) =~ "Live Slide" end)
     refute render_plain(presenter) =~ "value: 0"
 
     Breeze.Test.render!(presentation)
@@ -163,6 +220,38 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
     Breeze.Test.render!(presentation)
 
     assert eventually(fn -> render_plain(presenter) =~ "value: 0" end)
+  end
+
+  test "disables Breeze slide input while presenter navigation is transitioning" do
+    presentation = start_presentation(plain_then_counter_deck())
+    on_exit(fn -> Breeze.Test.stop(presentation) end)
+
+    Breeze.Test.render!(presentation)
+    Breeze.Test.info(presentation, {:easy_breezy_presenter_subscribe, self()})
+    Breeze.Test.info(presentation, {:easy_breezy_presenter_command, self(), :next})
+    Breeze.Test.render!(presentation)
+
+    assert Breeze.Test.metadata(presentation).assigns.transition
+    assert Breeze.Test.metadata(presentation).focused == nil
+
+    %{pid: child} = :sys.get_state(presentation.pid).children["breeze-slide-counter"]
+
+    Breeze.Test.info(
+      presentation,
+      {:easy_breezy_presenter_command, self(), {:input, %{"key" => "ArrowUp"}}}
+    )
+
+    assert Breeze.ChildServer.metadata(child).assigns.count == 0
+    assert Breeze.Test.metadata(presentation).assigns.transition
+
+    finish_transition(presentation)
+
+    Breeze.Test.info(
+      presentation,
+      {:easy_breezy_presenter_command, self(), {:input, %{"key" => "ArrowUp"}}}
+    )
+
+    assert Breeze.ChildServer.metadata(child).assigns.count == 1
   end
 
   test "forwarded movement keys stay on the live slide when the child consumes them" do
@@ -345,6 +434,36 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
     pid
   end
 
+  defp start_fake_server_presentation(deck) do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    owner = self()
+    snapshot_server = spawn(fn -> snapshot_server_loop(owner) end)
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: EasyBreezy.Slideshow,
+        server: snapshot_server,
+        terminal: terminal,
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [
+          deck: deck,
+          presenter_mode: :presentation,
+          themes: [:nebula],
+          theme: :nebula
+        ]
+      )
+
+    {%Breeze.Test{pid: pid, terminal: terminal}, snapshot_server}
+  end
+
+  defp snapshot_server_loop(owner) do
+    receive do
+      {:"$gen_cast", {:live_snapshot, slide_id, recipient, ref, _opts}} ->
+        send(owner, {:snapshot_request, self(), slide_id, recipient, ref})
+        snapshot_server_loop(owner)
+    end
+  end
+
   defp deck do
     %Deck{
       title: "Presenter Live Test",
@@ -412,8 +531,7 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
           id: :plain,
           title: "Plain",
           layout: :bullets,
-          payload: %{title: "Plain", items: ["Other"]},
-          disable_transitions?: true
+          payload: %{title: "Plain", items: ["Other"]}
         },
         %Slide{
           id: :counter,
@@ -502,7 +620,7 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
 
     if transition do
       for _ <- 0..transition.frames do
-        send(session.pid, :transition_tick)
+        send(session.pid, {:transition_tick, transition.id})
       end
     end
   end

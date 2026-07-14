@@ -158,6 +158,7 @@ defmodule EasyBreezy.SlideshowTest do
     refute Map.has_key?(assigns, :presenter_subscribers)
     refute Map.has_key?(assigns, :presenter_registry_monitor_ref)
     refute Map.has_key?(assigns, :presenter_registry_retry_ref)
+    refute Map.has_key?(assigns, :presenter_live_sync)
   end
 
   test "a presentation registers again when the supervised registry restarts" do
@@ -182,11 +183,20 @@ defmodule EasyBreezy.SlideshowTest do
   end
 
   test "the presenter reset command restarts the presentation timer" do
-    session = start_session()
+    session = start_session(start_opts: [presenter_mode: :presentation])
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     started_at_ms = Breeze.Test.metadata(session).assigns.started_at_ms
     Process.sleep(2)
+
+    Breeze.Test.info(
+      session,
+      {:easy_breezy_presenter_command, self(), :reset_timer}
+    )
+
+    assert Breeze.Test.metadata(session).assigns.started_at_ms == started_at_ms
+
+    Breeze.Test.info(session, {:easy_breezy_presenter_subscribe, self()})
 
     Breeze.Test.info(
       session,
