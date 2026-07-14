@@ -2,7 +2,8 @@ defmodule EasyBreezy.PresenterViewTest do
   use ExUnit.Case, async: false
 
   alias EasyBreezy.Deck.Markdown
-  alias EasyBreezy.{Deck, Slide}
+  alias EasyBreezy.{Deck, PresenterSync, Slide}
+  alias EasyBreezy.PresenterSync.Session, as: PresentationSession
 
   defmodule LivePreviewView do
     use Breeze.View
@@ -27,8 +28,8 @@ defmodule EasyBreezy.PresenterViewTest do
   end
 
   test "escape does not close the presenter" do
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, _presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: text_deck(), theme: :nebula]
@@ -43,8 +44,8 @@ defmodule EasyBreezy.PresenterViewTest do
   test "mount restores the presentation timer from start options" do
     started_at_ms = System.monotonic_time(:millisecond) - 125_000
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, _presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: text_deck(), theme: :nebula, started_at_ms: started_at_ms]
@@ -56,19 +57,14 @@ defmodule EasyBreezy.PresenterViewTest do
   end
 
   test "ctrl+r prompts before resetting the timer" do
-    sync_name = {:easy_breezy_reset_timer_test, System.unique_integer([:positive])}
-    EasyBreezy.PresenterSync.register(sync_name)
-
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
-        start_opts: [deck: text_deck(), theme: :nebula, sync_name: sync_name]
+        start_opts: [deck: text_deck(), theme: :nebula]
       )
 
     on_exit(fn -> Breeze.Test.stop(session) end)
-
-    assert_receive {:easy_breezy_presenter_subscribe, _pid}
 
     assert {:noreply, _focused, true} =
              Breeze.Test.event(session, nil, %{"ctrlKey" => true, "key" => "r"})
@@ -78,37 +74,35 @@ defmodule EasyBreezy.PresenterViewTest do
     plain = session |> Breeze.Test.render!() |> strip_ansi()
     assert plain =~ "Reset Timer"
     assert plain =~ "Reset elapsed timer to 00:00?"
-    refute_receive {:easy_breezy_presenter_command, _pid, :reset_timer}
+
+    refute_receive {:easy_breezy_presenter_command, ^presentation, _subscriber, :reset_timer}
 
     assert {:noreply, _focused, true} = Breeze.Test.input(session, "Escape")
     refute Breeze.Test.metadata(session).assigns.reset_timer_modal?
     refute session |> Breeze.Test.render!() |> strip_ansi() =~ "Reset Timer"
-    refute_receive {:easy_breezy_presenter_command, _pid, :reset_timer}
+
+    refute_receive {:easy_breezy_presenter_command, ^presentation, _subscriber, :reset_timer}
   end
 
   test "confirming the reset timer prompt resets the local clock and presentation timer" do
-    sync_name = {:easy_breezy_reset_timer_test, System.unique_integer([:positive])}
-    EasyBreezy.PresenterSync.register(sync_name)
-
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
-        start_opts: [deck: text_deck(), theme: :nebula, sync_name: sync_name]
+        start_opts: [deck: text_deck(), theme: :nebula]
       )
 
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert_receive {:easy_breezy_presenter_subscribe, _pid}
-
     old_started_at_ms = System.monotonic_time(:millisecond) - 125_000
 
-    Breeze.Test.info(
+    publish_state(
+      presentation,
       session,
-      {:easy_breezy_presentation_state,
-       presentation_payload(text_deck(), 0)
-       |> Map.put(:elapsed_ms, 125_000)
-       |> Map.put(:started_at_ms, old_started_at_ms)}
+      1,
+      presentation_payload(text_deck(), 0)
+      |> Map.put(:elapsed_ms, 125_000)
+      |> Map.put(:started_at_ms, old_started_at_ms)
     )
 
     assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Elapsed 02:05"
@@ -121,13 +115,16 @@ defmodule EasyBreezy.PresenterViewTest do
     refute Breeze.Test.metadata(session).assigns.reset_timer_modal?
     assert Breeze.Test.metadata(session).assigns.started_at_ms > old_started_at_ms
     assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Elapsed 00:00"
-    assert_receive {:easy_breezy_presenter_command, _pid, :reset_timer}
+
+    assert_receive {:easy_breezy_presenter_command, ^presentation, presenter_pid, :reset_timer}
+    assert presenter_pid == session.pid
   end
 
   test "resubscribes when a reloaded presentation replaces its root process" do
     sync_name = {:easy_breezy_reload_test, System.unique_integer([:positive])}
-    first = start_sync_target(sync_name, self())
-    assert_receive {:sync_target_ready, ^first}, 1_000
+    first_producer = start_sync_target(sync_name, self())
+
+    assert_receive {:sync_target_ready, ^first_producer, first_presentation}, 1_000
 
     session =
       Breeze.Test.start!(EasyBreezy.PresenterView,
@@ -138,20 +135,55 @@ defmodule EasyBreezy.PresenterViewTest do
 
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert_receive {:sync_target_subscribed, ^first, presenter_pid}
+    assert_receive {:sync_target_subscribed, ^first_presentation, presenter_pid}
     assert presenter_pid == session.pid
 
-    Process.exit(first, :kill)
-    second = start_sync_target(sync_name, self())
-    assert_receive {:sync_target_ready, ^second}, 1_000
+    monitor_ref = Process.monitor(first_presentation)
+    Process.exit(first_producer, :kill)
+    assert_receive {:DOWN, ^monitor_ref, :process, ^first_presentation, _reason}, 1_000
 
-    assert_receive {:sync_target_subscribed, ^second, ^presenter_pid}, 1_000
-    send(second, :stop)
+    second_producer = start_sync_target(sync_name, self())
+
+    assert_receive {:sync_target_ready, ^second_producer, second_presentation}, 1_000
+
+    assert_receive {:sync_target_subscribed, ^second_presentation, ^presenter_pid}, 1_000
+    send(second_producer, :stop)
+  end
+
+  test "keeps one presenter retry timer and ignores stale retry messages" do
+    sync_name = {:easy_breezy_retry_test, System.unique_integer([:positive])}
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: text_deck(), theme: :nebula, sync_name: sync_name]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    first = Breeze.Test.metadata(session).assigns
+    assert is_reference(first.presenter_retry_ref)
+    assert is_reference(first.presenter_retry_token)
+
+    Breeze.Test.info(session, {:presenter_sync_retry, first.presenter_retry_token})
+
+    second = Breeze.Test.metadata(session).assigns
+    assert is_reference(second.presenter_retry_ref)
+    assert is_reference(second.presenter_retry_token)
+    refute second.presenter_retry_ref == first.presenter_retry_ref
+    refute second.presenter_retry_token == first.presenter_retry_token
+
+    Breeze.Test.info(session, {:presenter_sync_retry, first.presenter_retry_token})
+
+    current = Breeze.Test.metadata(session).assigns
+    assert current.presenter_retry_ref == second.presenter_retry_ref
+    assert current.presenter_retry_token == second.presenter_retry_token
   end
 
   test "cleans up kitty images when the visible image set changes" do
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         terminal: recording_terminal(self()),
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: text_deck(), theme: :nebula, alt_screen: false]
@@ -159,24 +191,30 @@ defmodule EasyBreezy.PresenterViewTest do
 
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    Breeze.Test.info(
+    publish_state(
+      presentation,
       session,
-      {:easy_breezy_presentation_state, presentation_payload(image_deck(), 0)}
+      1,
+      presentation_payload(image_deck(), 0)
     )
 
     assert_receive {:terminal_write, output}
     assert output == EasyBreezy.Slideshow.KittyImage.delete_command()
 
-    Breeze.Test.info(
-      session,
-      {:easy_breezy_presentation_state, presentation_payload(image_deck(), 0)}
-    )
+    unchanged_payload = presentation_payload(image_deck(), 0)
+    assert :ok = PresenterSync.publish(presentation, 2, unchanged_payload)
+
+    assert eventually(fn ->
+             PresentationSession.latest(presentation) == {2, unchanged_payload}
+           end)
 
     refute_receive {:terminal_write, _}, 50
 
-    Breeze.Test.info(
+    publish_state(
+      presentation,
       session,
-      {:easy_breezy_presentation_state, presentation_payload(image_deck(), 1)}
+      3,
+      presentation_payload(image_deck(), 1)
     )
 
     assert_receive {:terminal_write, output}
@@ -186,8 +224,8 @@ defmodule EasyBreezy.PresenterViewTest do
   test "caps the next preview frame at the presentation width" do
     deck = preview_deck()
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {250, 70},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula]
@@ -200,7 +238,7 @@ defmodule EasyBreezy.PresenterViewTest do
       |> presentation_payload(0)
       |> Map.merge(%{screen_width: 86, screen_height: 23})
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+    publish_state(presentation, session, 1, payload)
 
     rendered = Breeze.Test.render!(session)
     plain = strip_ansi(rendered)
@@ -214,8 +252,8 @@ defmodule EasyBreezy.PresenterViewTest do
   test "next preview shows a placeholder for live slides" do
     deck = live_preview_deck()
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula]
@@ -230,7 +268,7 @@ defmodule EasyBreezy.PresenterViewTest do
         "breeze-slide-live-demo" => %{assigns: %{count: 7}}
       })
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+    publish_state(presentation, session, 1, payload)
 
     plain = session |> Breeze.Test.render!() |> strip_ansi()
 
@@ -254,8 +292,8 @@ defmodule EasyBreezy.PresenterViewTest do
       <!-- Mention the return value -->
       """)
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula]
@@ -263,7 +301,7 @@ defmodule EasyBreezy.PresenterViewTest do
 
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+    publish_state(presentation, session, 1, presentation_payload(deck, 0))
 
     plain = session |> Breeze.Test.render!() |> strip_ansi()
 
@@ -283,8 +321,8 @@ defmodule EasyBreezy.PresenterViewTest do
       <!-- Demonstrate the live counter -->
       """)
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula]
@@ -292,7 +330,7 @@ defmodule EasyBreezy.PresenterViewTest do
 
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+    publish_state(presentation, session, 1, presentation_payload(deck, 0))
 
     plain = session |> Breeze.Test.render!() |> strip_ansi()
 
@@ -304,8 +342,8 @@ defmodule EasyBreezy.PresenterViewTest do
   test "sync payload elapsed time uses the local presenter clock" do
     deck = text_deck()
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula]
@@ -321,7 +359,7 @@ defmodule EasyBreezy.PresenterViewTest do
         elapsed_ms: 125_000
       })
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+    publish_state(presentation, session, 1, payload)
 
     plain = session |> Breeze.Test.render!() |> strip_ansi()
 
@@ -339,8 +377,8 @@ defmodule EasyBreezy.PresenterViewTest do
       - Rendered bullet
       """)
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula]
@@ -353,7 +391,7 @@ defmodule EasyBreezy.PresenterViewTest do
       |> presentation_payload(0)
       |> Map.put(:source_mode?, true)
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+    publish_state(presentation, session, 1, payload)
 
     plain = session |> Breeze.Test.render!() |> strip_ansi()
 
@@ -368,8 +406,8 @@ defmodule EasyBreezy.PresenterViewTest do
     File.write!(path, "preview-image")
     deck = text_to_image_deck(path)
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {120, 30},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula]
@@ -377,7 +415,7 @@ defmodule EasyBreezy.PresenterViewTest do
 
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+    publish_state(presentation, session, 1, presentation_payload(deck, 0))
 
     rendered = Breeze.Test.render!(session)
     assert rendered =~ "Next: Image"
@@ -406,8 +444,8 @@ defmodule EasyBreezy.PresenterViewTest do
     File.write!(path, "preview-image")
     deck = text_to_full_image_deck(path)
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {120, 30},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula]
@@ -415,7 +453,7 @@ defmodule EasyBreezy.PresenterViewTest do
 
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+    publish_state(presentation, session, 1, presentation_payload(deck, 0))
     Breeze.Test.render!(session)
 
     assert {_module, state} = Breeze.Test.metadata(session).implicit_state["slide-image"]
@@ -442,8 +480,8 @@ defmodule EasyBreezy.PresenterViewTest do
     File.write!(path, "preview-image")
     deck = live_to_image_deck(path)
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {204, 50},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula]
@@ -456,7 +494,7 @@ defmodule EasyBreezy.PresenterViewTest do
       |> presentation_payload(0)
       |> Map.merge(%{screen_width: 84, screen_height: 24})
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+    publish_state(presentation, session, 1, payload)
 
     {:ok, _acc, _box, decorations} =
       Breeze.ChildServer.render_snapshot(session.pid, terminal: session.terminal)
@@ -484,34 +522,33 @@ defmodule EasyBreezy.PresenterViewTest do
   end
 
   test "arrow-key scrolling updates presenter scroll state and sends a presentation command" do
-    sync_name = {:easy_breezy_test, System.unique_integer([:positive])}
-    EasyBreezy.PresenterSync.register(sync_name)
     deck = long_bullets_deck()
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
-        start_opts: [deck: deck, theme: :nebula, alt_screen: false, sync_name: sync_name]
+        start_opts: [deck: deck, theme: :nebula, alt_screen: false]
       )
 
     on_exit(fn -> Breeze.Test.stop(session) end)
-
-    assert_receive {:easy_breezy_presenter_subscribe, _pid}
 
     payload =
       deck
       |> presentation_payload(0)
       |> Map.merge(%{step: 29, screen_width: 80, screen_height: 12})
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+    publish_state(presentation, session, 1, payload)
     Breeze.Test.render!(session)
 
     assert scroll_offset(session, "slide-bullets") == 0
 
     Breeze.Test.input(session, "ArrowDown")
 
-    assert_receive {:easy_breezy_presenter_command, _pid, {:scroll, %{"key" => "ArrowDown"}}}
+    assert_receive {:easy_breezy_presenter_command, ^presentation, presenter_pid,
+                    {:scroll, %{"key" => "ArrowDown"}}}
+
+    assert presenter_pid == session.pid
 
     assert scroll_offset(session, "slide-bullets") > 0
   end
@@ -519,8 +556,8 @@ defmodule EasyBreezy.PresenterViewTest do
   test "presentation scroll state payload syncs the presenter preview" do
     deck = long_bullets_deck()
 
-    session =
-      Breeze.Test.start!(EasyBreezy.PresenterView,
+    {session, presentation} =
+      start_presenter(
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [deck: deck, theme: :nebula, alt_screen: false]
@@ -538,10 +575,34 @@ defmodule EasyBreezy.PresenterViewTest do
         scroll_state: %{"slide-bullets" => %{offset_y: 4, autoscroll: nil, pinned_bottom: false}}
       })
 
-    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+    publish_state(presentation, session, 1, payload)
     Breeze.Test.render!(session)
 
     assert scroll_offset(session, "slide-bullets") == 4
+  end
+
+  defp start_presenter(opts) do
+    sync_name = {:presenter_view_test, System.unique_integer([:positive, :monotonic])}
+    {:ok, presentation} = PresenterSync.start_presentation(sync_name)
+
+    opts =
+      Keyword.update!(opts, :start_opts, fn start_opts ->
+        Keyword.put(start_opts, :sync_name, sync_name)
+      end)
+
+    presenter = Breeze.Test.start!(EasyBreezy.PresenterView, opts)
+
+    assert eventually(fn -> PresentationSession.subscriber_count(presentation) == 1 end)
+
+    {presenter, presentation}
+  end
+
+  defp publish_state(presentation, presenter, revision, payload) do
+    assert :ok = PresenterSync.publish(presentation, revision, payload)
+
+    assert eventually(fn ->
+             Breeze.Test.metadata(presenter).assigns.presentation_revision == revision
+           end)
   end
 
   defp recording_terminal(owner) do
@@ -700,23 +761,36 @@ defmodule EasyBreezy.PresenterViewTest do
 
   defp start_sync_target(sync_name, owner) do
     spawn(fn ->
-      EasyBreezy.PresenterSync.register(sync_name)
-      send(owner, {:sync_target_ready, self()})
-      sync_target_loop(owner)
+      {:ok, presentation} = PresenterSync.start_presentation(sync_name)
+      send(owner, {:sync_target_ready, self(), presentation})
+      sync_target_loop(owner, presentation)
     end)
   end
 
-  defp sync_target_loop(owner) do
+  defp sync_target_loop(owner, presentation) do
     receive do
-      {:easy_breezy_presenter_subscribe, presenter_pid} ->
-        send(owner, {:sync_target_subscribed, self(), presenter_pid})
-        sync_target_loop(owner)
+      {:easy_breezy_presenter_state_request, ^presentation, presenter_pid} ->
+        send(owner, {:sync_target_subscribed, presentation, presenter_pid})
+        sync_target_loop(owner, presentation)
 
       :stop ->
         :ok
 
       _message ->
-        sync_target_loop(owner)
+        sync_target_loop(owner, presentation)
     end
   end
+
+  defp eventually(fun, attempts \\ 100)
+
+  defp eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(fun, attempts - 1)
+    end
+  end
+
+  defp eventually(_fun, 0), do: false
 end

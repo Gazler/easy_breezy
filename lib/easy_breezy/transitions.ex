@@ -87,6 +87,7 @@ defmodule EasyBreezy.Transitions do
   end
 
   def start(term, to_index, to_step, direction) do
+    term = cancel(term)
     body_width = max(term.assigns.screen_width - 6, 20)
     body_height = max(term.assigns.screen_height - 6, 8)
     distance = transition_distance(direction, body_width, body_height)
@@ -94,11 +95,13 @@ defmodule EasyBreezy.Transitions do
     interval_ms = transition_interval_ms(direction, distance, frames)
     frozen_now = System.monotonic_time(:millisecond)
     code_slide_snapshots = code_slide_snapshots(term, to_index, to_step, body_width, body_height)
-
-    Process.send_after(self(), :transition_tick, interval_ms)
+    id = make_ref()
+    timer_ref = Process.send_after(self(), {:transition_tick, id}, interval_ms)
 
     Breeze.View.assign(term,
       transition: %{
+        id: id,
+        timer_ref: timer_ref,
         from_index: term.assigns.slide_index,
         from_step: term.assigns.step,
         to_index: to_index,
@@ -113,6 +116,14 @@ defmodule EasyBreezy.Transitions do
       }
     )
   end
+
+  def cancel(%{assigns: %{transition: %{timer_ref: timer_ref}}} = term)
+      when is_reference(timer_ref) do
+    Process.cancel_timer(timer_ref)
+    Breeze.View.assign(term, transition: nil)
+  end
+
+  def cancel(term), do: Breeze.View.assign(term, transition: nil)
 
   def direction(slide, :forward), do: incoming_transition_direction(slide.transition)
   def direction(slide, :backward), do: reverse_transition_direction(slide.transition)

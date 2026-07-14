@@ -19,7 +19,6 @@ defmodule EasyBreezy.PresenterView do
   @retry_ms 1_000
   @resubscribe_ms 50
   @clock_tick_ms 1_000
-  @live_snapshot_tick_ms 100
   @live_slide_movement_keys [
     "ArrowUp",
     "ArrowDown",
@@ -57,9 +56,11 @@ defmodule EasyBreezy.PresenterView do
         presentation_screen_height: nil,
         live_state: %{},
         live_snapshot: nil,
-        live_snapshot_poll_ref: nil,
         presentation_monitor_ref: nil,
         presentation_pid: nil,
+        presenter_retry_ref: nil,
+        presenter_retry_token: nil,
+        presentation_revision: nil,
         sync_name: sync_name,
         sync_status: "connecting",
         themes: Keyword.get(opts, :themes, @themes),
@@ -391,22 +392,30 @@ defmodule EasyBreezy.PresenterView do
     {:noreply, assign(term, screen_width: screen_width, screen_height: screen_height)}
   end
 
-  def handle_info(:presenter_sync_retry, term) do
+  def handle_info(
+        {:presenter_sync_retry, token},
+        %{assigns: %{presenter_retry_token: token}} = term
+      ) do
+    term = cancel_presenter_retry(term)
     {:noreply, subscribe_to_presentation(term)}
   end
+
+  def handle_info({:presenter_sync_retry, _stale_token}, term),
+    do: {:noreply, term, invalidate: false}
 
   def handle_info(
         {:DOWN, ref, :process, pid, _reason},
         %{assigns: %{presentation_monitor_ref: ref, presentation_pid: pid}} = term
       ) do
-    Process.send_after(self(), :presenter_sync_retry, @resubscribe_ms)
-
     {:noreply,
-     assign(term,
+     term
+     |> assign(
        presentation_monitor_ref: nil,
        presentation_pid: nil,
+       presentation_revision: nil,
        sync_status: "connecting"
-     )}
+     )
+     |> schedule_presenter_retry(@resubscribe_ms)}
   end
 
   def handle_info(:clock_tick, term) do
@@ -414,20 +423,24 @@ defmodule EasyBreezy.PresenterView do
     {:noreply, assign(term, elapsed_label: ElapsedTime.label(term.assigns.started_at_ms))}
   end
 
-  def handle_info(:live_snapshot_poll, term) do
-    term = assign(term, live_snapshot_poll_ref: nil)
-
-    if current_synced_live_slide?(term.assigns) do
-      case EasyBreezy.PresenterSync.request_state(term.assigns.sync_name, self()) do
-        :ok -> {:noreply, schedule_live_snapshot_poll(term), invalidate: false}
-        :error -> {:noreply, term, invalidate: false}
-      end
-    else
-      {:noreply, term, invalidate: false}
-    end
+  def handle_info(
+        {:easy_breezy_presentation_state, session, revision, _payload},
+        %{
+          assigns: %{
+            presentation_pid: session,
+            presentation_revision: current_revision
+          }
+        } = term
+      )
+      when is_integer(revision) and is_integer(current_revision) and revision <= current_revision do
+    {:noreply, term, invalidate: false}
   end
 
-  def handle_info({:easy_breezy_presentation_state, payload}, term) when is_map(payload) do
+  def handle_info(
+        {:easy_breezy_presentation_state, session, revision, payload},
+        %{assigns: %{presentation_pid: session}} = term
+      )
+      when is_integer(revision) and is_map(payload) do
     theme_name = Map.get(payload, :theme_name, term.assigns.theme_name)
     deck = Map.get(payload, :deck, term.assigns.deck)
     slide_index = Map.get(payload, :slide_index, term.assigns.slide_index)
@@ -457,6 +470,7 @@ defmodule EasyBreezy.PresenterView do
         actual_theme_mode: Map.get(payload, :actual_theme_mode, term.assigns.actual_theme_mode),
         theme_status: Map.get(payload, :theme_status, term.assigns.theme_status),
         live_snapshot: live_snapshot,
+        presentation_revision: revision,
         sync_status: "connected"
       )
       |> assign_theme(theme_name)
@@ -464,11 +478,13 @@ defmodule EasyBreezy.PresenterView do
       |> PresenterScroll.import(Map.get(payload, :scroll_state))
       |> focus_current_live_slide()
       |> maybe_delete_presenter_image_overlay(previous_term)
-      |> schedule_live_snapshot_poll()
       |> maybe_put_source_saved_flash(source_saved?, deck)
 
     {:noreply, term}
   end
+
+  def handle_info({:easy_breezy_presentation_state, _session, _revision, _payload}, term),
+    do: {:noreply, term, invalidate: false}
 
   def handle_info(_, term), do: {:noreply, term}
 
@@ -476,13 +492,34 @@ defmodule EasyBreezy.PresenterView do
     case EasyBreezy.PresenterSync.subscribe(term.assigns.sync_name) do
       {:ok, pid} ->
         term
+        |> cancel_presenter_retry()
         |> monitor_presentation(pid)
         |> assign(sync_status: "connected")
 
       :error ->
-        Process.send_after(self(), :presenter_sync_retry, @retry_ms)
-        assign(term, sync_status: "connecting")
+        term
+        |> assign(sync_status: "connecting")
+        |> schedule_presenter_retry(@retry_ms)
     end
+  end
+
+  defp schedule_presenter_retry(
+         %{assigns: %{presenter_retry_ref: retry_ref}} = term,
+         _delay_ms
+       )
+       when is_reference(retry_ref),
+       do: term
+
+  defp schedule_presenter_retry(term, delay_ms) do
+    token = make_ref()
+    retry_ref = Process.send_after(self(), {:presenter_sync_retry, token}, delay_ms)
+
+    assign(term, presenter_retry_ref: retry_ref, presenter_retry_token: token)
+  end
+
+  defp cancel_presenter_retry(term) do
+    cancel_timer(term.assigns.presenter_retry_ref)
+    assign(term, presenter_retry_ref: nil, presenter_retry_token: nil)
   end
 
   defp monitor_presentation(
@@ -504,7 +541,10 @@ defmodule EasyBreezy.PresenterView do
   end
 
   defp send_command(term, command) do
-    EasyBreezy.PresenterSync.command(term.assigns.sync_name, command)
+    if is_pid(term.assigns.presentation_pid) do
+      EasyBreezy.PresenterSync.command(term.assigns.presentation_pid, command)
+    end
+
     term
   end
 
@@ -669,18 +709,12 @@ defmodule EasyBreezy.PresenterView do
     end
   end
 
-  defp schedule_live_snapshot_poll(%{assigns: %{live_snapshot_poll_ref: ref}} = term)
-       when is_reference(ref),
-       do: term
-
-  defp schedule_live_snapshot_poll(term) do
-    if current_synced_live_slide?(term.assigns) do
-      ref = Process.send_after(self(), :live_snapshot_poll, @live_snapshot_tick_ms)
-      assign(term, live_snapshot_poll_ref: ref)
-    else
-      term
-    end
+  defp cancel_timer(timer_ref) when is_reference(timer_ref) do
+    Process.cancel_timer(timer_ref)
+    :ok
   end
+
+  defp cancel_timer(_timer_ref), do: :ok
 
   defp focus_current_live_slide(term) do
     {slide, _slide_index, _step} = current_position(term.assigns)

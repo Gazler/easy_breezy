@@ -1,7 +1,7 @@
 defmodule EasyBreezy.SlideshowTest do
   use ExUnit.Case, async: false
 
-  alias EasyBreezy.{Deck, Slide}
+  alias EasyBreezy.{Deck, PresenterSync, Slide}
 
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
@@ -149,18 +149,23 @@ defmodule EasyBreezy.SlideshowTest do
   end
 
   test "the presenter reset command restarts the presentation timer" do
-    session = start_session()
+    sync_name = {__MODULE__, :reset_timer, System.unique_integer([:positive, :monotonic])}
+
+    session =
+      start_session(start_opts: [presenter_mode: :presentation, sync_name: sync_name])
+
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     started_at_ms = Breeze.Test.metadata(session).assigns.started_at_ms
     Process.sleep(2)
 
-    Breeze.Test.info(
-      session,
-      {:easy_breezy_presenter_command, self(), :reset_timer}
-    )
+    presenter_session = Breeze.Test.metadata(session).assigns.presenter_session_pid
+    assert {:ok, ^presenter_session} = PresenterSync.subscribe(presenter_session)
+    assert :ok = PresenterSync.command(presenter_session, :reset_timer)
 
-    assert Breeze.Test.metadata(session).assigns.started_at_ms > started_at_ms
+    assert eventually(fn ->
+             Breeze.Test.metadata(session).assigns.started_at_ms > started_at_ms
+           end)
   end
 
   test "i toggles the current slide markdown source" do
@@ -446,6 +451,19 @@ defmodule EasyBreezy.SlideshowTest do
       assert {:noreply, _focused, _changed?} = Breeze.Test.input(session, key)
     end)
   end
+
+  defp eventually(fun, attempts \\ 30)
+
+  defp eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      true
+    else
+      Process.sleep(25)
+      eventually(fun, attempts - 1)
+    end
+  end
+
+  defp eventually(_fun, 0), do: false
 
   defp start_session(opts) do
     deck = Keyword.get(opts, :deck, deck())

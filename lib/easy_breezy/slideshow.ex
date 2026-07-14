@@ -14,6 +14,9 @@ defmodule EasyBreezy.Slideshow do
   alias Breeze.Theme
 
   @themes Theme.default_cycle()
+  @live_snapshot_timeout_ms 1_000
+  @live_snapshot_refresh_ms 100
+  @presenter_session_retry_ms 50
   # Breeze's direct server input path leaves CSI-u Escape as "27u".
   @escape_keys ["Escape", "Esc", "\e", "27u"]
   @live_slide_movement_keys [
@@ -52,7 +55,19 @@ defmodule EasyBreezy.Slideshow do
         presenter?: Keyword.get(opts, :presenter, false),
         presenter_mode: Keyword.get(opts, :presenter_mode, :single),
         presenter_sync_name: EasyBreezy.PresenterSync.name(opts),
-        presenter_subscribers: MapSet.new(),
+        presenter_session_pid: nil,
+        presenter_session_monitor_ref: nil,
+        presenter_session_retry_ref: nil,
+        presenter_session_retry_token: nil,
+        presenter_subscriber_count: 0,
+        presentation_revision: 0,
+        presentation_publish_revision: 0,
+        presentation_broadcast_revision: -1,
+        publish_pending?: false,
+        live_snapshot_request: nil,
+        deferred_snapshot_publish?: false,
+        live_snapshot_refresh_ref: nil,
+        live_snapshot_refresh_token: nil,
         keybindings_bar?: Keyword.get(opts, :keybindings_bar?, false),
         theme_status?: Keyword.get(opts, :theme_status?, false),
         source_editor: Keyword.get(opts, :source_editor),
@@ -66,9 +81,8 @@ defmodule EasyBreezy.Slideshow do
       )
       |> assign_theme_context()
       |> maybe_put_scroll_keybindings()
-      |> maybe_register_presentation()
+      |> maybe_start_presentation_session()
       |> maybe_restore_source_save_flash(opts)
-      |> maybe_publish_presentation_soon()
 
     {:ok, term |> clamp_position() |> focus_visible_live_slide()}
   end
@@ -329,8 +343,12 @@ defmodule EasyBreezy.Slideshow do
      |> maybe_publish_presentation_soon()}
   end
 
-  def handle_info(:publish_presentation_state, term) do
-    maybe_publish_presentation(term)
+  def handle_info({:publish_presentation_state, _queued_revision}, term) do
+    term =
+      term
+      |> assign(publish_pending?: false)
+      |> maybe_publish_presentation()
+
     {:noreply, term, invalidate: false}
   end
 
@@ -344,59 +362,103 @@ defmodule EasyBreezy.Slideshow do
     {:noreply, term, invalidate: false}
   end
 
-  def handle_info({:easy_breezy_presenter_subscribe, pid}, term) when is_pid(pid) do
-    Process.monitor(pid)
+  def handle_info(
+        {:presenter_session_retry, token},
+        %{assigns: %{presenter_session_retry_token: token}} = term
+      ) do
+    term = assign(term, presenter_session_retry_ref: nil, presenter_session_retry_token: nil)
+    {:noreply, maybe_start_presentation_session(term), invalidate: false}
+  end
+
+  def handle_info({:presenter_session_retry, _stale_token}, term),
+    do: {:noreply, term, invalidate: false}
+
+  def handle_info(
+        {:easy_breezy_presenter_subscribers, session, count},
+        %{assigns: %{presenter_session_pid: session}} = term
+      )
+      when is_integer(count) and count >= 0 do
+    term = assign(term, presenter_subscriber_count: count)
 
     term =
-      update_in(term.assigns.presenter_subscribers, fn subscribers ->
-        subscribers
-        |> ensure_map_set()
-        |> MapSet.put(pid)
-      end)
-
-    maybe_publish_presentation(term)
-    {:noreply, term}
-  end
-
-  def handle_info({:easy_breezy_presenter_state_request, pid}, term) when is_pid(pid) do
-    if request_server_live_snapshot(term) == :requested do
-      :ok
-    else
-      publish_presentation(term, [pid], presentation_live_snapshot(term))
-    end
+      if count > 0 do
+        maybe_publish_presentation_soon(term)
+      else
+        cancel_live_snapshot_refresh(term)
+      end
 
     {:noreply, term, invalidate: false}
   end
 
-  def handle_info({:breeze_live_snapshot, _ref, id, {:ok, snapshot}}, term)
-      when is_binary(id) and is_map(snapshot) do
-    if id == visible_live_slide_id(term.assigns) do
-      publish_presentation(term, normalize_live_snapshot(snapshot, id))
-    end
-
-    {:noreply, term, invalidate: false}
+  def handle_info(
+        {:easy_breezy_presenter_state_request, session, _subscriber},
+        %{assigns: %{presenter_session_pid: session}} = term
+      ) do
+    {:noreply, maybe_publish_presentation_soon(term), invalidate: false}
   end
 
-  def handle_info({:breeze_live_snapshot, _ref, id, _reply}, term) do
-    if id == visible_live_slide_id(term.assigns) do
-      publish_presentation(term, nil)
-    end
-
-    {:noreply, term, invalidate: false}
-  end
-
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, term) when is_pid(pid) do
-    {:noreply, remove_presenter_subscriber(term, pid)}
-  end
-
-  def handle_info({:easy_breezy_presenter_command, _pid, command}, term) do
+  def handle_info(
+        {:easy_breezy_presenter_command, session, _subscriber, command},
+        %{assigns: %{presenter_session_pid: session}} = term
+      ) do
     {:noreply, handle_presenter_command(command, term)}
   end
 
-  def handle_info(:transition_tick, %{assigns: %{transition: nil}} = term), do: {:noreply, term}
+  def handle_info({:breeze_live_snapshot, ref, id, {:ok, snapshot}}, term)
+      when is_binary(id) and is_map(snapshot) do
+    {:noreply, finish_live_snapshot_request(term, ref, id, snapshot), invalidate: false}
+  end
 
-  def handle_info(:transition_tick, term) do
-    transition = term.assigns.transition
+  def handle_info({:breeze_live_snapshot, ref, id, _reply}, term) do
+    {:noreply, finish_live_snapshot_request(term, ref, id, nil), invalidate: false}
+  end
+
+  def handle_info({:live_snapshot_timeout, ref}, term) do
+    {:noreply, timeout_live_snapshot_request(term, ref), invalidate: false}
+  end
+
+  def handle_info(
+        {:DOWN, ref, :process, session, _reason},
+        %{
+          assigns: %{
+            presenter_session_pid: session,
+            presenter_session_monitor_ref: ref
+          }
+        } = term
+      ) do
+    term =
+      term
+      |> cancel_live_snapshot_refresh()
+      |> cancel_live_snapshot_request()
+      |> assign(
+        presenter_session_pid: nil,
+        presenter_session_monitor_ref: nil,
+        presenter_subscriber_count: 0
+      )
+      |> schedule_presenter_session_retry()
+
+    {:noreply, term, invalidate: false}
+  end
+
+  def handle_info(
+        {:presentation_live_snapshot_refresh, token},
+        %{assigns: %{live_snapshot_refresh_token: token}} = term
+      ) do
+    term =
+      term
+      |> assign(live_snapshot_refresh_ref: nil, live_snapshot_refresh_token: nil)
+      |> maybe_publish_presentation_soon()
+
+    {:noreply, term, invalidate: false}
+  end
+
+  def handle_info({:presentation_live_snapshot_refresh, _stale_token}, term),
+    do: {:noreply, term, invalidate: false}
+
+  def handle_info(
+        {:transition_tick, id},
+        %{assigns: %{transition: %{id: id} = transition}} = term
+      ) do
     frame = transition.frame + 1
 
     if frame >= transition.frames do
@@ -410,10 +472,13 @@ defmodule EasyBreezy.Slideshow do
        |> focus_visible_live_slide()
        |> maybe_publish_presentation_soon()}
     else
-      Process.send_after(self(), :transition_tick, transition.interval_ms)
-      {:noreply, assign(term, transition: %{transition | frame: frame})}
+      timer_ref = Process.send_after(self(), {:transition_tick, id}, transition.interval_ms)
+
+      {:noreply, assign(term, transition: %{transition | frame: frame, timer_ref: timer_ref})}
     end
   end
+
+  def handle_info({:transition_tick, _stale_id}, term), do: {:noreply, term, invalidate: false}
 
   def handle_info(_, term), do: {:noreply, term}
 
@@ -546,12 +611,59 @@ defmodule EasyBreezy.Slideshow do
 
   defp resolve_code_payload_for_steps(payload, _body_width), do: payload
 
-  defp maybe_register_presentation(%{assigns: %{presenter_mode: :presentation}} = term) do
-    EasyBreezy.PresenterSync.register(term.assigns.presenter_sync_name)
-    term
+  defp maybe_start_presentation_session(
+         %{assigns: %{presenter_mode: :presentation, presenter_session_pid: pid}} = term
+       )
+       when is_pid(pid),
+       do: term
+
+  defp maybe_start_presentation_session(%{assigns: %{presenter_mode: :presentation}} = term) do
+    case EasyBreezy.PresenterSync.ensure_presentation(
+           term.assigns.presenter_sync_name,
+           self()
+         ) do
+      {:ok, session} ->
+        monitor_ref = Process.monitor(session)
+
+        term
+        |> cancel_presenter_session_retry()
+        |> assign(
+          presenter_session_pid: session,
+          presenter_session_monitor_ref: monitor_ref
+        )
+        |> maybe_publish_presentation_soon()
+
+      {:error, _reason} ->
+        schedule_presenter_session_retry(term)
+    end
   end
 
-  defp maybe_register_presentation(term), do: term
+  defp maybe_start_presentation_session(term), do: term
+
+  defp schedule_presenter_session_retry(%{assigns: %{presenter_session_retry_ref: ref}} = term)
+       when is_reference(ref),
+       do: term
+
+  defp schedule_presenter_session_retry(term) do
+    token = make_ref()
+
+    timer_ref =
+      Process.send_after(
+        self(),
+        {:presenter_session_retry, token},
+        @presenter_session_retry_ms
+      )
+
+    assign(term,
+      presenter_session_retry_ref: timer_ref,
+      presenter_session_retry_token: token
+    )
+  end
+
+  defp cancel_presenter_session_retry(term) do
+    cancel_timer(term.assigns.presenter_session_retry_ref)
+    assign(term, presenter_session_retry_ref: nil, presenter_session_retry_token: nil)
+  end
 
   defp maybe_put_scroll_keybindings(%{assigns: %{presenter_mode: :presentation}} = term) do
     put_local_keybindings(term, scroll_keybindings())
@@ -581,40 +693,62 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp maybe_publish_presentation_soon(%{assigns: %{presenter_mode: :presentation}} = term) do
-    send(self(), :publish_presentation_state)
-    term
+    revision = term.assigns.presentation_revision + 1
+    term = assign(term, presentation_revision: revision)
+
+    term =
+      if is_pid(term.assigns.presenter_session_pid) and not term.assigns.publish_pending? do
+        send(self(), {:publish_presentation_state, revision})
+        assign(term, publish_pending?: true)
+      else
+        term
+      end
+
+    update_live_snapshot_refresh(term)
   end
 
   defp maybe_publish_presentation_soon(term), do: term
 
-  defp maybe_publish_presentation(%{assigns: %{presenter_mode: :presentation}} = term) do
-    if request_server_live_snapshot(term) == :requested do
-      :ok
-    else
-      publish_presentation(term, presentation_live_snapshot(term))
+  defp maybe_publish_presentation(
+         %{assigns: %{presenter_mode: :presentation, presenter_session_pid: session}} = term
+       )
+       when is_pid(session) do
+    case request_server_live_snapshot(term) do
+      {:requested, term} -> term
+      {:not_requested, term} -> publish_presentation(term, presentation_live_snapshot(term))
     end
   end
 
-  defp maybe_publish_presentation(_term), do: :ok
+  defp maybe_publish_presentation(term), do: term
 
   defp publish_presentation(term, live_snapshot) do
-    publish_presentation(term, ensure_map_set(term.assigns.presenter_subscribers), live_snapshot)
-  end
+    publish_revision = term.assigns.presentation_publish_revision + 1
+    payload = presentation_payload(term, live_snapshot)
 
-  defp publish_presentation(term, subscribers, live_snapshot) do
-    subscribers = ensure_map_set(subscribers)
+    case EasyBreezy.PresenterSync.publish(
+           term.assigns.presenter_session_pid,
+           publish_revision,
+           payload
+         ) do
+      :ok ->
+        assign(term,
+          presentation_publish_revision: publish_revision,
+          presentation_broadcast_revision: term.assigns.presentation_revision
+        )
 
-    if MapSet.size(subscribers) > 0 do
-      EasyBreezy.PresenterSync.publish(subscribers, presentation_payload(term, live_snapshot))
+      :error ->
+        term
     end
   end
 
   defp maybe_publish_after_render(%{presenter_mode: :presentation} = assigns) do
-    if assigns.presenter_subscribers |> ensure_map_set() |> MapSet.size() > 0 do
-      send(self(), :publish_presentation_state)
+    if is_pid(assigns.presenter_session_pid) and not assigns.publish_pending? and
+         assigns.presentation_broadcast_revision < assigns.presentation_revision do
+      send(self(), {:publish_presentation_state, assigns.presentation_revision})
+      Map.put(assigns, :publish_pending?, true)
+    else
+      assigns
     end
-
-    assigns
   end
 
   defp maybe_publish_after_render(assigns), do: assigns
@@ -642,17 +776,41 @@ defmodule EasyBreezy.Slideshow do
     }
   end
 
-  defp remove_presenter_subscriber(term, pid) do
-    update_in(term.assigns.presenter_subscribers, fn subscribers ->
-      subscribers
-      |> ensure_map_set()
-      |> MapSet.delete(pid)
-    end)
+  defp update_live_snapshot_refresh(term) do
+    cond do
+      term.assigns.presenter_subscriber_count == 0 ->
+        cancel_live_snapshot_refresh(term)
+
+      not is_pid(term.assigns.presenter_session_pid) ->
+        cancel_live_snapshot_refresh(term)
+
+      not is_binary(visible_live_slide_id(term.assigns)) ->
+        cancel_live_snapshot_refresh(term)
+
+      is_reference(term.assigns.live_snapshot_refresh_ref) ->
+        term
+
+      true ->
+        token = make_ref()
+
+        timer_ref =
+          Process.send_after(
+            self(),
+            {:presentation_live_snapshot_refresh, token},
+            @live_snapshot_refresh_ms
+          )
+
+        assign(term,
+          live_snapshot_refresh_ref: timer_ref,
+          live_snapshot_refresh_token: token
+        )
+    end
   end
 
-  defp ensure_map_set(%MapSet{} = set), do: set
-  defp ensure_map_set(values) when is_list(values), do: MapSet.new(values)
-  defp ensure_map_set(_value), do: MapSet.new()
+  defp cancel_live_snapshot_refresh(term) do
+    cancel_timer(term.assigns.live_snapshot_refresh_ref)
+    assign(term, live_snapshot_refresh_ref: nil, live_snapshot_refresh_token: nil)
+  end
 
   defp handle_presenter_command(:next, term),
     do: term |> advance() |> maybe_publish_presentation_soon()
@@ -846,7 +1004,7 @@ defmodule EasyBreezy.Slideshow do
   defp jump_to_slide(term, slide_index) do
     slide_index = clamp_slide_index(term.assigns.deck, slide_index)
 
-    if slide_index == term.assigns.slide_index do
+    if is_nil(term.assigns.transition) and slide_index == term.assigns.slide_index do
       term
     else
       jump_to_position(term, slide_index, 0)
@@ -856,7 +1014,8 @@ defmodule EasyBreezy.Slideshow do
   defp jump_to_position(term, slide_index, step) do
     {slide_index, step} = clamped_position(term.assigns.deck, slide_index, step)
 
-    if slide_index == term.assigns.slide_index and step == term.assigns.step do
+    if is_nil(term.assigns.transition) and slide_index == term.assigns.slide_index and
+         step == term.assigns.step do
       term
     else
       do_jump_to_position(term, slide_index, step)
@@ -867,8 +1026,8 @@ defmodule EasyBreezy.Slideshow do
     previous_slide = current_slide(term.assigns)
 
     term
+    |> EasyBreezy.Transitions.cancel()
     |> assign(slide_index: slide_index, step: step)
-    |> assign(transition: nil)
     |> focus_visible_live_slide()
     |> maybe_delete_image_overlay(previous_slide)
   end
@@ -880,7 +1039,8 @@ defmodule EasyBreezy.Slideshow do
     {slide_index, step} = clamped_position(deck, term.assigns.slide_index, term.assigns.step)
 
     term
-    |> assign(slide_index: slide_index, step: step, transition: nil)
+    |> EasyBreezy.Transitions.cancel()
+    |> assign(slide_index: slide_index, step: step)
     |> focus_visible_live_slide()
     |> maybe_delete_image_overlay(previous_slide)
   end
@@ -1155,25 +1315,121 @@ defmodule EasyBreezy.Slideshow do
        when is_pid(server) do
     with id when is_binary(id) <- visible_live_slide_id(term.assigns),
          true <- function_exported?(Breeze.Server, :request_live_snapshot, 5) do
-      ref = make_ref()
+      case term.assigns.live_snapshot_request do
+        nil ->
+          ref = make_ref()
 
-      apply(Breeze.Server, :request_live_snapshot, [
-        server,
-        id,
-        self(),
-        ref,
-        [compact_snapshot: true]
-      ])
+          apply(Breeze.Server, :request_live_snapshot, [
+            server,
+            id,
+            self(),
+            ref,
+            [compact_snapshot: true]
+          ])
 
-      :requested
+          timeout_ref =
+            Process.send_after(self(), {:live_snapshot_timeout, ref}, @live_snapshot_timeout_ms)
+
+          request = %{
+            ref: ref,
+            id: id,
+            revision: term.assigns.presentation_revision,
+            timeout_ref: timeout_ref
+          }
+
+          {:requested, assign(term, live_snapshot_request: request)}
+
+        %{id: ^id, revision: revision}
+        when revision == term.assigns.presentation_revision ->
+          {:requested, term}
+
+        _request ->
+          {:requested, defer_snapshot_publish(term)}
+      end
     else
-      _other -> :not_requested
+      _other -> {:not_requested, term}
     end
   catch
-    :exit, _reason -> :not_requested
+    :exit, _reason -> {:not_requested, term}
   end
 
-  defp request_server_live_snapshot(_term), do: :not_requested
+  defp request_server_live_snapshot(term), do: {:not_requested, term}
+
+  defp finish_live_snapshot_request(term, ref, id, snapshot) do
+    case term.assigns.live_snapshot_request do
+      %{ref: ^ref} = request ->
+        cancel_timer(request.timeout_ref)
+        term = assign(term, live_snapshot_request: nil)
+
+        term =
+          if live_snapshot_request_current?(term, request, id) do
+            publish_presentation(
+              term,
+              normalize_live_snapshot(snapshot, request.id)
+            )
+          else
+            term
+          end
+
+        flush_deferred_snapshot_publish(term)
+
+      _stale_request ->
+        term
+    end
+  end
+
+  defp timeout_live_snapshot_request(term, ref) do
+    case term.assigns.live_snapshot_request do
+      %{ref: ^ref} = request ->
+        term = assign(term, live_snapshot_request: nil)
+
+        term =
+          if live_snapshot_request_current?(term, request, request.id) do
+            publish_presentation(term, nil)
+          else
+            term
+          end
+
+        flush_deferred_snapshot_publish(term)
+
+      _stale_request ->
+        term
+    end
+  end
+
+  defp live_snapshot_request_current?(term, request, reply_id) do
+    request.id == reply_id and
+      request.id == visible_live_slide_id(term.assigns) and
+      request.revision == term.assigns.presentation_revision
+  end
+
+  defp defer_snapshot_publish(term), do: assign(term, deferred_snapshot_publish?: true)
+
+  defp flush_deferred_snapshot_publish(term) do
+    if term.assigns.deferred_snapshot_publish? do
+      term
+      |> assign(deferred_snapshot_publish?: false)
+      |> maybe_publish_presentation()
+    else
+      term
+    end
+  end
+
+  defp cancel_live_snapshot_request(term) do
+    case term.assigns.live_snapshot_request do
+      %{timeout_ref: timeout_ref} -> cancel_timer(timeout_ref)
+      _other -> :ok
+    end
+
+    assign(term, live_snapshot_request: nil, deferred_snapshot_publish?: false)
+  end
+
+  defp cancel_timer(timer_ref) when is_reference(timer_ref) do
+    Process.cancel_timer(timer_ref)
+    :ok
+  end
+
+  defp cancel_timer(_timer_ref), do: :ok
 
   defp normalize_live_snapshot(%{content: content} = snapshot, fallback_id)
        when is_binary(content) do

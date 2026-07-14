@@ -1,7 +1,7 @@
 defmodule EasyBreezy.SlideshowPresenterLiveTest do
   use ExUnit.Case, async: false
 
-  alias EasyBreezy.{Deck, Slide}
+  alias EasyBreezy.{Deck, PresenterSync, Slide}
 
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
@@ -72,9 +72,13 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
     on_exit(fn -> Breeze.Test.stop(presentation) end)
 
     Breeze.Test.render!(presentation)
-    Breeze.Test.info(presentation, {:easy_breezy_presenter_subscribe, self()})
+    presenter_session = presenter_session(presentation)
+    assert {:ok, ^presenter_session} = PresenterSync.subscribe(presenter_session)
 
-    payload = wait_for_payload(fn payload -> snapshot_content(payload) =~ "value: 0" end)
+    payload =
+      wait_for_payload(presenter_session, fn payload ->
+        snapshot_content(payload) =~ "value: 0"
+      end)
 
     assert payload.live_snapshot.id == "breeze-slide-counter"
     assert payload.live_snapshot.width == 74
@@ -458,18 +462,23 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
     """)
   end
 
-  defp wait_for_payload(fun, attempts \\ 20)
+  defp wait_for_payload(presenter_session, fun, attempts \\ 20)
 
-  defp wait_for_payload(fun, attempts) when attempts > 0 do
+  defp wait_for_payload(presenter_session, fun, attempts) when attempts > 0 do
     receive do
-      {:easy_breezy_presentation_state, payload} ->
-        if fun.(payload), do: payload, else: wait_for_payload(fun, attempts - 1)
+      {:easy_breezy_presentation_state, ^presenter_session, _revision, payload} ->
+        if fun.(payload) do
+          payload
+        else
+          wait_for_payload(presenter_session, fun, attempts - 1)
+        end
     after
-      50 -> wait_for_payload(fun, attempts - 1)
+      50 -> wait_for_payload(presenter_session, fun, attempts - 1)
     end
   end
 
-  defp wait_for_payload(_fun, 0), do: flunk("timed out waiting for presentation payload")
+  defp wait_for_payload(_presenter_session, _fun, 0),
+    do: flunk("timed out waiting for presentation payload")
 
   defp snapshot_content(%{live_snapshot: %{content: content}}), do: content
   defp snapshot_content(_payload), do: ""
@@ -497,12 +506,16 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
 
   defp slide_index(session), do: Breeze.Test.metadata(session).assigns.slide_index
 
+  defp presenter_session(session) do
+    Breeze.Test.metadata(session).assigns.presenter_session_pid
+  end
+
   defp finish_transition(session) do
     transition = Breeze.Test.metadata(session).assigns.transition
 
     if transition do
       for _ <- 0..transition.frames do
-        send(session.pid, :transition_tick)
+        send(session.pid, {:transition_tick, transition.id})
       end
     end
   end
