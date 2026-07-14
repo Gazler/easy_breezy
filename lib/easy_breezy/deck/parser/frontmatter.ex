@@ -1,4 +1,4 @@
-defmodule EasyBreezy.Deck.Markdown.FrontmatterParser do
+defmodule EasyBreezy.Deck.Parser.Frontmatter do
   @moduledoc false
 
   import NimbleParsec
