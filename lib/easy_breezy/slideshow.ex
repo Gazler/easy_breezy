@@ -6,6 +6,7 @@ defmodule EasyBreezy.Slideshow do
   alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
   alias EasyBreezy.PresenterScroll
+  alias EasyBreezy.Slide
   alias EasyBreezy.SourceEditor
   import Breeze.Blocks
   import EasyBreezy.Layouts
@@ -578,12 +579,9 @@ defmodule EasyBreezy.Slideshow do
     %{deck | slides: Enum.map(slides, &normalize_slide_steps(&1, body_width))}
   end
 
-  defp normalize_slide_steps(
-         %EasyBreezy.Slide{layout: :code, payload: payload} = slide,
-         body_width
-       ) do
-    payload
-    |> resolve_code_payload_for_steps(body_width)
+  defp normalize_slide_steps(%Slide{layout: :code} = slide, body_width) do
+    slide
+    |> Slide.resolve_payload(body_width, 0)
     |> Map.get(:code_focus_ranges, [])
     |> CodeSlide.step_count()
     |> case do
@@ -593,12 +591,6 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp normalize_slide_steps(slide, _body_width), do: slide
-
-  defp resolve_code_payload_for_steps(payload, body_width) when is_function(payload, 2) do
-    payload.(body_width, 0)
-  end
-
-  defp resolve_code_payload_for_steps(payload, _body_width), do: payload
 
   defp maybe_register_presentation(%{assigns: %{presenter_mode: :presentation}} = term, opts) do
     term

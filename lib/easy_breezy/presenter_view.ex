@@ -7,6 +7,7 @@ defmodule EasyBreezy.PresenterView do
   alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
   alias EasyBreezy.PresenterScroll
+  alias EasyBreezy.Slide
   alias EasyBreezy.SourceEditor
   alias EasyBreezy.Slideshow.KittyImage
   alias Breeze.Theme
@@ -581,13 +582,13 @@ defmodule EasyBreezy.PresenterView do
   defp image_slide_keys(nil), do: []
 
   defp image_slide_keys(%{layout: :image} = slide) do
-    payload = resolve_slide_payload(slide, 80, 0)
+    payload = Slide.resolve_payload(slide, 80, 0)
     [{:full, Map.get(payload, :path) || Map.get(payload, :image_path)}]
   end
 
   defp image_slide_keys(slide) do
     slide
-    |> resolve_slide_payload(80, 0)
+    |> Slide.resolve_payload(80, 0)
     |> image_payload_keys()
   end
 
@@ -664,7 +665,7 @@ defmodule EasyBreezy.PresenterView do
   end
 
   defp speaker_notes(slide, body_width, step) do
-    payload = resolve_slide_payload(slide, body_width, step)
+    payload = Slide.resolve_payload(slide, body_width, step)
 
     payload
     |> Map.get(:notes)
@@ -707,14 +708,6 @@ defmodule EasyBreezy.PresenterView do
     do: put_flash(term, :success, "Updated in memory", id: "source-written", duration: 3_000)
 
   defp maybe_put_source_saved_flash(term, false, _deck), do: term
-
-  defp resolve_slide_payload(%{payload: payload}, body_width, step) when is_function(payload, 2),
-    do: payload.(body_width, step)
-
-  defp resolve_slide_payload(%{payload: payload}, _body_width, _step) when is_map(payload),
-    do: payload
-
-  defp resolve_slide_payload(_slide, _body_width, _step), do: %{}
 
   defp next_label(nil, width), do: truncate_label("Next: End of deck", width)
   defp next_label(slide, width), do: truncate_label("Next: #{slide.title}", width)

@@ -4,6 +4,7 @@ defmodule EasyBreezy.Transitions do
   use Breeze.View
 
   alias EasyBreezy.Layouts.CodeSlide
+  alias EasyBreezy.Slide
 
   import EasyBreezy.Layouts
 
@@ -237,7 +238,7 @@ defmodule EasyBreezy.Transitions do
          code_theme,
          theme_colors
        ) do
-    payload = resolve_slide_payload(slide, body_width, step)
+    payload = Slide.resolve_payload(slide, body_width, step)
     source = Map.get(payload, :code_source)
 
     if is_binary(source) do
@@ -288,14 +289,6 @@ defmodule EasyBreezy.Transitions do
          _theme_colors
        ),
        do: snapshots
-
-  defp resolve_slide_payload(%{payload: payload}, body_width, step) when is_function(payload, 2),
-    do: payload.(body_width, step)
-
-  defp resolve_slide_payload(%{payload: payload}, _body_width, _step) when is_map(payload),
-    do: payload
-
-  defp resolve_slide_payload(_slide, _body_width, _step), do: %{}
 
   defp transition_positions(:forward, body_width, _body_height, distance),
     do: {-distance, 0, body_width - distance, 0}

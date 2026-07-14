@@ -13,6 +13,7 @@ defmodule EasyBreezy.Layouts do
   import EasyBreezy.Layouts.TwoColumnSlide
 
   alias EasyBreezy.Layouts.CodeSlide
+  alias EasyBreezy.Slide
 
   attr :slide, :any, required: true
   attr :body_width, :integer, required: true
@@ -58,7 +59,7 @@ defmodule EasyBreezy.Layouts do
   def slide_body(assigns) do
     payload =
       assigns.slide
-      |> resolve_slide_payload(assigns.body_width, assigns.step)
+      |> Slide.resolve_payload(assigns.body_width, assigns.step)
       |> resolve_code_payload(assigns.step)
 
     assigns =
@@ -208,18 +209,6 @@ defmodule EasyBreezy.Layouts do
     />
     """
   end
-
-  defp resolve_slide_payload(%{payload: payload}, body_width, step) when is_function(payload, 2),
-    do: payload.(body_width, step)
-
-  defp resolve_slide_payload(%{layout: :breeze, payload: view}, _body_width, _step)
-       when is_atom(view),
-       do: %{view: view}
-
-  defp resolve_slide_payload(%{payload: payload}, _body_width, _step) when is_map(payload),
-    do: payload
-
-  defp resolve_slide_payload(_slide, _body_width, _step), do: %{}
 
   defp resolve_code_payload(%{code_focus_ranges: focus_ranges} = payload, step) do
     %{payload | code_focus_ranges: CodeSlide.focus_ranges_for_step(focus_ranges, step)}
