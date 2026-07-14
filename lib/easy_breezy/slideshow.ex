@@ -32,6 +32,9 @@ defmodule EasyBreezy.Slideshow do
     body_width = max(screen_width - 6, 20)
     deck = opts |> Keyword.fetch!(:deck) |> normalize_deck_steps(body_width)
 
+    started_at_ms =
+      Keyword.get_lazy(opts, :started_at_ms, fn -> System.monotonic_time(:millisecond) end)
+
     term =
       term
       |> maybe_enter_alt_screen(opts)
@@ -56,7 +59,7 @@ defmodule EasyBreezy.Slideshow do
         source_mode?: Keyword.get(opts, :source_mode?, false),
         live_state: %{},
         themes: Keyword.get(opts, :themes, @themes),
-        started_at_ms: System.monotonic_time(:millisecond),
+        started_at_ms: started_at_ms,
         goto_modal?: false,
         goto_slide_input: "",
         goto_slide_error: nil
@@ -678,6 +681,12 @@ defmodule EasyBreezy.Slideshow do
     term
     |> Breeze.View.cycle_theme(theme_cycle_opts(term))
     |> assign_theme_context()
+    |> maybe_publish_presentation_soon()
+  end
+
+  defp handle_presenter_command(:reset_timer, term) do
+    term
+    |> assign(started_at_ms: System.monotonic_time(:millisecond))
     |> maybe_publish_presentation_soon()
   end
 

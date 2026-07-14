@@ -39,7 +39,9 @@ defmodule EasyBreezy.PresenterView do
 
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
     {theme_name, theme} = resolve_theme(Keyword.get(opts, :theme, :nebula))
-    started_at_ms = System.monotonic_time(:millisecond)
+
+    started_at_ms =
+      Keyword.get_lazy(opts, :started_at_ms, fn -> System.monotonic_time(:millisecond) end)
 
     term =
       term
@@ -63,6 +65,7 @@ defmodule EasyBreezy.PresenterView do
         themes: Keyword.get(opts, :themes, @themes),
         started_at_ms: started_at_ms,
         elapsed_label: ElapsedTime.label(started_at_ms),
+        reset_timer_modal?: false,
         source_editor: nil,
         source_mode?: false,
         theme_name: theme_name,
@@ -261,9 +264,43 @@ defmodule EasyBreezy.PresenterView do
           <box class="text-right bg-panel text" style={@footer_clock_style}>{@elapsed_label}</box>
         </box>
       </box>
+      <.modal
+        :if={@reset_timer_modal?}
+        id="reset-timer-modal"
+        width={44}
+        height={7}
+        dim
+        br-change="close_reset_timer"
+      >
+        <:title>Reset Timer</:title>
+        <box class="absolute left-2 top-2 text">Reset elapsed timer to 00:00?</box>
+        <box class="absolute left-2 top-4 text-muted">Enter/y reset · Esc/n cancel</box>
+      </.modal>
       <.flash_group flash={@breeze.flash} width={42}/>
     </box>
     """
+  end
+
+  def handle_event("close_reset_timer", _event, term) do
+    {:noreply, close_reset_timer(term)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{reset_timer_modal?: true}} = term)
+      when key in ["Enter", "y", "Y"] do
+    {:noreply, reset_timer(term)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{reset_timer_modal?: true}} = term)
+      when key in ["Escape", "n", "N"] do
+    {:noreply, close_reset_timer(term)}
+  end
+
+  def handle_event(_, %{"key" => _key}, %{assigns: %{reset_timer_modal?: true}} = term) do
+    {:noreply, term}
+  end
+
+  def handle_event(_, %{"ctrlKey" => true, "key" => key}, term) when key in ["r", "R"] do
+    {:noreply, open_reset_timer(term)}
   end
 
   def handle_event(
@@ -469,6 +506,22 @@ defmodule EasyBreezy.PresenterView do
   defp send_command(term, command) do
     EasyBreezy.PresenterSync.command(term.assigns.sync_name, command)
     term
+  end
+
+  defp open_reset_timer(term), do: assign(term, reset_timer_modal?: true)
+
+  defp close_reset_timer(term), do: assign(term, reset_timer_modal?: false)
+
+  defp reset_timer(term) do
+    started_at_ms = System.monotonic_time(:millisecond)
+
+    term
+    |> assign(
+      reset_timer_modal?: false,
+      started_at_ms: started_at_ms,
+      elapsed_label: ElapsedTime.label(started_at_ms)
+    )
+    |> send_command(:reset_timer)
   end
 
   defp forward_input(term, event) do

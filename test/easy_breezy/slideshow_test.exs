@@ -148,6 +148,21 @@ defmodule EasyBreezy.SlideshowTest do
     assert Process.alive?(session.pid)
   end
 
+  test "the presenter reset command restarts the presentation timer" do
+    session = start_session()
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    started_at_ms = Breeze.Test.metadata(session).assigns.started_at_ms
+    Process.sleep(2)
+
+    Breeze.Test.info(
+      session,
+      {:easy_breezy_presenter_command, self(), :reset_timer}
+    )
+
+    assert Breeze.Test.metadata(session).assigns.started_at_ms > started_at_ms
+  end
+
   test "i toggles the current slide markdown source" do
     deck =
       EasyBreezy.Deck.Markdown.parse!("""
@@ -223,6 +238,23 @@ defmodule EasyBreezy.SlideshowTest do
              )
 
     assert Keyword.fetch!(start_opts, :source_save_notice) == notice
+  end
+
+  test "preserves the presentation timer through refreshed server options" do
+    started_at_ms = System.monotonic_time(:millisecond) - 125_000
+
+    assert [start_opts: start_opts] =
+             EasyBreezy.refresh_server_opts(
+               [deck: fn -> deck() end],
+               %{metadata: %{assigns: %{started_at_ms: started_at_ms}}}
+             )
+
+    assert Keyword.fetch!(start_opts, :started_at_ms) == started_at_ms
+
+    session = start_session(start_opts: start_opts)
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert Breeze.Test.metadata(session).assigns.started_at_ms == started_at_ms
   end
 
   test "passes the header theme status option through to the slideshow" do

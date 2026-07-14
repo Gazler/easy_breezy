@@ -40,6 +40,90 @@ defmodule EasyBreezy.PresenterViewTest do
     assert Process.alive?(session.pid)
   end
 
+  test "mount restores the presentation timer from start options" do
+    started_at_ms = System.monotonic_time(:millisecond) - 125_000
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: text_deck(), theme: :nebula, started_at_ms: started_at_ms]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert Breeze.Test.metadata(session).assigns.started_at_ms == started_at_ms
+  end
+
+  test "ctrl+r prompts before resetting the timer" do
+    sync_name = {:easy_breezy_reset_timer_test, System.unique_integer([:positive])}
+    EasyBreezy.PresenterSync.register(sync_name)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: text_deck(), theme: :nebula, sync_name: sync_name]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert_receive {:easy_breezy_presenter_subscribe, _pid}
+
+    assert {:noreply, _focused, true} =
+             Breeze.Test.event(session, nil, %{"ctrlKey" => true, "key" => "r"})
+
+    assert Breeze.Test.metadata(session).assigns.reset_timer_modal?
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+    assert plain =~ "Reset Timer"
+    assert plain =~ "Reset elapsed timer to 00:00?"
+    refute_receive {:easy_breezy_presenter_command, _pid, :reset_timer}
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "Escape")
+    refute Breeze.Test.metadata(session).assigns.reset_timer_modal?
+    refute session |> Breeze.Test.render!() |> strip_ansi() =~ "Reset Timer"
+    refute_receive {:easy_breezy_presenter_command, _pid, :reset_timer}
+  end
+
+  test "confirming the reset timer prompt resets the local clock and presentation timer" do
+    sync_name = {:easy_breezy_reset_timer_test, System.unique_integer([:positive])}
+    EasyBreezy.PresenterSync.register(sync_name)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: text_deck(), theme: :nebula, sync_name: sync_name]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert_receive {:easy_breezy_presenter_subscribe, _pid}
+
+    old_started_at_ms = System.monotonic_time(:millisecond) - 125_000
+
+    Breeze.Test.info(
+      session,
+      {:easy_breezy_presentation_state,
+       presentation_payload(text_deck(), 0)
+       |> Map.put(:elapsed_ms, 125_000)
+       |> Map.put(:started_at_ms, old_started_at_ms)}
+    )
+
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Elapsed 02:05"
+
+    assert {:noreply, _focused, true} =
+             Breeze.Test.event(session, nil, %{"ctrlKey" => true, "key" => "r"})
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "Enter")
+
+    refute Breeze.Test.metadata(session).assigns.reset_timer_modal?
+    assert Breeze.Test.metadata(session).assigns.started_at_ms > old_started_at_ms
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Elapsed 00:00"
+    assert_receive {:easy_breezy_presenter_command, _pid, :reset_timer}
+  end
+
   test "resubscribes when a reloaded presentation replaces its root process" do
     sync_name = {:easy_breezy_reload_test, System.unique_integer([:positive])}
     first = start_sync_target(sync_name, self())
