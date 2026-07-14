@@ -5,6 +5,7 @@ defmodule EasyBreezy.Slideshow do
   alias EasyBreezy.Deck.Markdown.Editor, as: MarkdownEditor
   alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
+  alias EasyBreezy.Navigation
   alias EasyBreezy.PresenterScroll
   alias EasyBreezy.Slide
   alias EasyBreezy.SourceEditor
@@ -280,20 +281,21 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_event(_, %{"key" => "Home"}, term) do
+    {slide_index, step} = Navigation.first(term.assigns.deck)
+
     {:noreply,
      term
-     |> jump_to_position(0, 0)
+     |> jump_to_position(slide_index, step)
      |> focus_visible_live_slide()
      |> maybe_publish_presentation_soon()}
   end
 
   def handle_event(_, %{"key" => "End"}, term) do
-    last_index = length(term.assigns.deck.slides) - 1
-    last_slide = Enum.at(term.assigns.deck.slides, last_index)
+    {slide_index, step} = Navigation.last(term.assigns.deck)
 
     {:noreply,
      term
-     |> jump_to_position(last_index, last_slide.steps)
+     |> jump_to_position(slide_index, step)
      |> focus_visible_live_slide()
      |> maybe_publish_presentation_soon()}
   end
@@ -526,41 +528,16 @@ defmodule EasyBreezy.Slideshow do
     String.replace(value || "", ~r/\D/, "")
   end
 
+  defp advance(%{assigns: %{transition: transition}} = term) when not is_nil(transition),
+    do: focus_visible_live_slide(term)
+
   defp advance(term) do
-    term =
-      if term.assigns.transition do
-        term
-      else
-        slide = current_slide(term.assigns)
+    position = {term.assigns.slide_index, term.assigns.step}
+    target = Navigation.next(term.assigns.deck, position)
 
-        cond do
-          term.assigns.step < slide.steps ->
-            assign(term, step: term.assigns.step + 1)
-
-          term.assigns.slide_index < length(term.assigns.deck.slides) - 1 ->
-            next_index = term.assigns.slide_index + 1
-            next_slide = Enum.at(term.assigns.deck.slides, next_index)
-            direction = EasyBreezy.Transitions.direction(next_slide, :forward)
-
-            if EasyBreezy.Transitions.enabled?(
-                 slide,
-                 next_slide,
-                 direction,
-                 term.assigns.actual_theme_mode
-               ) do
-              EasyBreezy.Transitions.start(term, next_index, 0, direction)
-            else
-              term
-              |> assign(slide_index: next_index, step: 0)
-              |> maybe_delete_image_overlay(slide)
-            end
-
-          true ->
-            term
-        end
-      end
-
-    focus_visible_live_slide(term)
+    term
+    |> move_to_adjacent_position(target, :forward)
+    |> focus_visible_live_slide()
   end
 
   defp maybe_enter_alt_screen(term, opts) do
@@ -788,18 +765,19 @@ defmodule EasyBreezy.Slideshow do
     do: term |> retreat() |> maybe_publish_presentation_soon()
 
   defp handle_presenter_command(:home, term) do
+    {slide_index, step} = Navigation.first(term.assigns.deck)
+
     term
-    |> jump_to_position(0, 0)
+    |> jump_to_position(slide_index, step)
     |> focus_visible_live_slide()
     |> maybe_publish_presentation_soon()
   end
 
   defp handle_presenter_command(:end, term) do
-    last_index = length(term.assigns.deck.slides) - 1
-    last_slide = Enum.at(term.assigns.deck.slides, last_index)
+    {slide_index, step} = Navigation.last(term.assigns.deck)
 
     term
-    |> jump_to_position(last_index, last_slide.steps)
+    |> jump_to_position(slide_index, step)
     |> focus_visible_live_slide()
     |> maybe_publish_presentation_soon()
   end
@@ -934,44 +912,59 @@ defmodule EasyBreezy.Slideshow do
   defp live_focus(id, focused) when is_binary(focused), do: id <> "::" <> focused
   defp live_focus(id, _focused), do: id
 
+  defp retreat(%{assigns: %{transition: transition}} = term) when not is_nil(transition),
+    do: focus_visible_live_slide(term)
+
   defp retreat(term) do
-    term =
-      if term.assigns.transition do
+    position = {term.assigns.slide_index, term.assigns.step}
+    target = Navigation.previous(term.assigns.deck, position)
+
+    term
+    |> move_to_adjacent_position(target, :backward)
+    |> focus_visible_live_slide()
+  end
+
+  defp move_to_adjacent_position(term, {slide_index, step}, traversal) do
+    current_position = {term.assigns.slide_index, term.assigns.step}
+
+    cond do
+      {slide_index, step} == current_position ->
         term
-      else
-        cond do
-          term.assigns.step > 0 ->
-            assign(term, step: term.assigns.step - 1)
 
-          term.assigns.slide_index > 0 ->
-            previous_index = term.assigns.slide_index - 1
-            previous_slide = Enum.at(term.assigns.deck.slides, previous_index)
-            slide = current_slide(term.assigns)
-            direction = EasyBreezy.Transitions.direction(slide, :backward)
+      slide_index == term.assigns.slide_index ->
+        assign(term, step: step)
 
-            if EasyBreezy.Transitions.enabled?(
-                 slide,
-                 previous_slide,
-                 direction,
-                 term.assigns.actual_theme_mode
-               ) do
-              EasyBreezy.Transitions.start(term, previous_index, previous_slide.steps, direction)
-            else
-              term
-              |> assign(slide_index: previous_index, step: previous_slide.steps)
-              |> maybe_delete_image_overlay(slide)
-            end
+      true ->
+        move_to_adjacent_slide(term, slide_index, step, traversal)
+    end
+  end
 
-          true ->
-            term
-        end
+  defp move_to_adjacent_slide(term, slide_index, step, traversal) do
+    current_slide = current_slide(term.assigns)
+    target_slide = Navigation.slide(term.assigns.deck, slide_index)
+
+    direction =
+      case traversal do
+        :forward -> EasyBreezy.Transitions.direction(target_slide, :forward)
+        :backward -> EasyBreezy.Transitions.direction(current_slide, :backward)
       end
 
-    focus_visible_live_slide(term)
+    if EasyBreezy.Transitions.enabled?(
+         current_slide,
+         target_slide,
+         direction,
+         term.assigns.actual_theme_mode
+       ) do
+      EasyBreezy.Transitions.start(term, slide_index, step, direction)
+    else
+      term
+      |> assign(slide_index: slide_index, step: step)
+      |> maybe_delete_image_overlay(current_slide)
+    end
   end
 
   defp jump_to_slide(term, slide_index) do
-    slide_index = clamp_slide_index(term.assigns.deck, slide_index)
+    {slide_index, _step} = Navigation.clamp(term.assigns.deck, {slide_index, 0})
 
     if is_nil(term.assigns.transition) and slide_index == term.assigns.slide_index do
       term
@@ -981,7 +974,7 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp jump_to_position(term, slide_index, step) do
-    {slide_index, step} = clamped_position(term.assigns.deck, slide_index, step)
+    {slide_index, step} = Navigation.clamp(term.assigns.deck, {slide_index, step})
 
     if is_nil(term.assigns.transition) and slide_index == term.assigns.slide_index and
          step == term.assigns.step do
@@ -1005,7 +998,7 @@ defmodule EasyBreezy.Slideshow do
 
   defp clamp_position(term, previous_slide) do
     deck = term.assigns.deck
-    {slide_index, step} = clamped_position(deck, term.assigns.slide_index, term.assigns.step)
+    {slide_index, step} = Navigation.clamp(deck, {term.assigns.slide_index, term.assigns.step})
 
     term
     |> assign(slide_index: slide_index, step: step, transition: nil)
@@ -1013,38 +1006,25 @@ defmodule EasyBreezy.Slideshow do
     |> maybe_delete_image_overlay(previous_slide)
   end
 
-  defp clamped_position(deck, slide_index, step) do
-    slide_index = clamp_slide_index(deck, slide_index)
-    slide = Enum.at(deck.slides, slide_index)
-    step = step |> max(0) |> min(slide.steps)
-
-    {slide_index, step}
-  end
-
-  defp clamp_slide_index(deck, slide_index) do
-    slide_index |> max(0) |> min(length(deck.slides) - 1)
-  end
-
   defp visible_position(%{
          transition: %{to_index: slide_index, to_step: step},
-         deck: %{slides: slides}
+         deck: deck
        }) do
-    {Enum.at(slides, slide_index), slide_index, step}
+    {Navigation.slide(deck, slide_index), slide_index, step}
   end
 
-  defp visible_position(%{deck: %{slides: slides}, slide_index: slide_index, step: step}) do
-    {Enum.at(slides, slide_index), slide_index, step}
+  defp visible_position(%{deck: deck, slide_index: slide_index, step: step}) do
+    {Navigation.slide(deck, slide_index), slide_index, step}
   end
 
-  defp current_slide(%{deck: %{slides: slides}, slide_index: slide_index}) do
-    Enum.at(slides, slide_index)
-  end
+  defp current_slide(%{deck: deck, slide_index: slide_index}),
+    do: Navigation.slide(deck, slide_index)
 
   defp visible_slide(%{
          transition: %{to_index: slide_index},
-         deck: %{slides: slides}
+         deck: deck
        }) do
-    Enum.at(slides, slide_index)
+    Navigation.slide(deck, slide_index)
   end
 
   defp visible_slide(assigns), do: current_slide(assigns)
@@ -1207,7 +1187,7 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp next_slide_title(assigns, slide_index) do
-    case Enum.at(assigns.deck.slides, slide_index + 1) do
+    case Navigation.slide(assigns.deck, slide_index + 1) do
       nil -> "end of deck"
       slide -> slide.title
     end

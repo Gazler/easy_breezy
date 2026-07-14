@@ -6,6 +6,7 @@ defmodule EasyBreezy.PresenterView do
   alias EasyBreezy.Layouts.CodeSlide
   alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
+  alias EasyBreezy.Navigation
   alias EasyBreezy.PresenterScroll
   alias EasyBreezy.Slide
   alias EasyBreezy.SourceEditor
@@ -88,7 +89,7 @@ defmodule EasyBreezy.PresenterView do
         is_integer(assigns.presentation_screen_height)
 
     {slide, slide_index, step} = current_position(assigns)
-    next_slide = Enum.at(assigns.deck.slides, slide_index + 1)
+    next_slide = Navigation.slide(assigns.deck, slide_index + 1)
 
     presentation_width = assigns.presentation_screen_width || 80
     presentation_height = assigns.presentation_screen_height || 24
@@ -539,16 +540,14 @@ defmodule EasyBreezy.PresenterView do
     end
   end
 
-  defp current_position(%{deck: %{slides: slides}, slide_index: slide_index, step: step}) do
-    slide = Enum.at(slides, slide_index) || List.first(slides)
+  defp current_position(%{deck: deck, slide_index: slide_index, step: step}) do
+    slide = Navigation.slide(deck, slide_index) || Navigation.slide(deck, 0)
     {slide, slide_index, step}
   end
 
   defp clamp_position(term) do
     deck = term.assigns.deck
-    slide_index = term.assigns.slide_index |> max(0) |> min(length(deck.slides) - 1)
-    slide = Enum.at(deck.slides, slide_index)
-    step = term.assigns.step |> max(0) |> min(slide.steps)
+    {slide_index, step} = Navigation.clamp(deck, {term.assigns.slide_index, term.assigns.step})
 
     term
     |> assign(slide_index: slide_index, step: step)
@@ -568,7 +567,7 @@ defmodule EasyBreezy.PresenterView do
 
   defp visible_image_keys(assigns) do
     {slide, slide_index, _step} = current_position(assigns)
-    next_slide = Enum.at(assigns.deck.slides, slide_index + 1)
+    next_slide = Navigation.slide(assigns.deck, slide_index + 1)
     current_slide = if assigns.source_mode?, do: nil, else: slide
 
     [{:current, current_slide}, {:next, next_slide}]
@@ -640,7 +639,7 @@ defmodule EasyBreezy.PresenterView do
 
   defp next_live_snapshot(previous_snapshot, payload, deck, slide_index) do
     snapshot = normalize_live_snapshot(Map.get(payload, :live_snapshot))
-    slide = Enum.at(deck.slides, slide_index)
+    slide = Navigation.slide(deck, slide_index)
 
     cond do
       live_snapshot_matches?(snapshot, slide) ->
