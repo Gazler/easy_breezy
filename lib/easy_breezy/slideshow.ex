@@ -9,6 +9,7 @@ defmodule EasyBreezy.Slideshow do
   alias EasyBreezy.PresenterScroll
   alias EasyBreezy.Slide
   alias EasyBreezy.SourceEditor
+  alias EasyBreezy.ThemeContext
   import Breeze.Blocks
   import EasyBreezy.Layouts
   import EasyBreezy.Layouts.SourceEditorView
@@ -1199,53 +1200,13 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp assign_theme_context(term) do
-    theme_name = current_breeze_theme_name(term) || Map.get(term.assigns, :theme_name) || :nebula
-
-    assign(term,
-      theme_name: theme_name,
-      actual_theme_mode: current_breeze_theme_mode(term) || term.theme.mode,
-      theme_status: current_breeze_theme_status(term) || Theme.probe_status(term.theme) || :ready
-    )
-    |> assign_code_theme(theme_name)
-    |> assign_theme_colors()
-  end
-
-  defp assign_code_theme(term, theme_name) do
-    assign(term, code_theme: CodeSlide.lumis_theme_name(theme_name))
-  end
-
-  defp assign_theme_colors(term) do
-    assign(term,
-      theme_colors: %{
-        bg: Theme.color(term.theme, :bg),
-        text: Theme.color(term.theme, :text),
-        primary: Theme.color(term.theme, :primary),
-        secondary: Theme.color(term.theme, :secondary),
-        muted: Theme.color(term.theme, :muted),
-        accent: Theme.color(term.theme, :accent),
-        panel: Theme.color(term.theme, :panel),
-        surface: Theme.color(term.theme, :surface),
-        stroke: Theme.color(term.theme, :stroke)
-      }
-    )
-  end
-
-  defp current_breeze_theme_name(term) do
-    get_in(term.assigns, [:breeze, :theme, :name])
-  end
-
-  defp current_breeze_theme_mode(term) do
-    get_in(term.assigns, [:breeze, :theme, :actual_mode])
-  end
-
-  defp current_breeze_theme_status(term) do
-    get_in(term.assigns, [:breeze, :theme, :status])
+    assign(term, ThemeContext.from_term(term))
   end
 
   defp theme_cycle_opts(term) do
     [
       themes: term.assigns.themes || @themes,
-      current: current_breeze_theme_name(term) || term.assigns.theme_name
+      current: term.assigns.theme_name
     ]
   end
 

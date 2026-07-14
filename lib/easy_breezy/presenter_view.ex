@@ -3,7 +3,6 @@ defmodule EasyBreezy.PresenterView do
 
   use Breeze.View
 
-  alias EasyBreezy.Layouts.CodeSlide
   alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
   alias EasyBreezy.Navigation
@@ -11,13 +10,14 @@ defmodule EasyBreezy.PresenterView do
   alias EasyBreezy.Slide
   alias EasyBreezy.SourceEditor
   alias EasyBreezy.Slideshow.KittyImage
+  alias EasyBreezy.ThemeContext
   alias Breeze.Theme
 
   import Breeze.Blocks
   import EasyBreezy.Layouts
   import EasyBreezy.Layouts.SourceEditorView
 
-  @themes [:system16, :system, :nebula, :catppuccin, :dracula, :gruvbox, :nord, :solarized_light]
+  @themes Theme.default_cycle()
   @retry_ms 1_000
   @resubscribe_ms 50
   @clock_tick_ms 1_000
@@ -39,7 +39,6 @@ defmodule EasyBreezy.PresenterView do
     EasyBreezy.PresenterSync.connect(sync_node)
 
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
-    {theme_name, theme} = resolve_theme(Keyword.get(opts, :theme, :nebula))
 
     started_at_ms =
       Keyword.get_lazy(opts, :started_at_ms, fn -> System.monotonic_time(:millisecond) end)
@@ -47,7 +46,7 @@ defmodule EasyBreezy.PresenterView do
     term =
       term
       |> maybe_enter_alt_screen(opts)
-      |> put_theme(theme)
+      |> Breeze.View.switch_theme(normalize_theme(Keyword.get(opts, :theme, :nebula)))
       |> assign(
         deck: deck,
         slide_index: Keyword.get(opts, :slide_index, 0),
@@ -67,13 +66,9 @@ defmodule EasyBreezy.PresenterView do
         elapsed_label: ElapsedTime.label(started_at_ms),
         reset_timer_modal?: false,
         source_editor: nil,
-        source_mode?: false,
-        theme_name: theme_name,
-        actual_theme_mode: term.theme.mode,
-        theme_status: Theme.probe_status(term.theme) || :ready
+        source_mode?: false
       )
-      |> assign_code_theme(theme_name)
-      |> assign_theme_colors()
+      |> assign_theme_context()
       |> put_local_keybindings(scroll_keybindings())
       |> subscribe_to_presentation()
       |> focus_current_live_slide()
@@ -446,7 +441,7 @@ defmodule EasyBreezy.PresenterView do
         live_snapshot: live_snapshot,
         sync_status: "connected"
       )
-      |> assign_theme(theme_name)
+      |> apply_theme(theme_name)
       |> clamp_position()
       |> PresenterScroll.import(Map.get(payload, :scroll_state))
       |> focus_current_live_slide()
@@ -736,46 +731,15 @@ defmodule EasyBreezy.PresenterView do
   defp live_terminal?(%Termite.Terminal{}), do: true
   defp live_terminal?(_terminal), do: false
 
-  defp assign_code_theme(term, theme_name) do
-    assign(term, code_theme: CodeSlide.lumis_theme_name(theme_name))
+  defp apply_theme(term, theme) do
+    term
+    |> Breeze.View.switch_theme(normalize_theme(theme))
+    |> assign_theme_context()
   end
 
-  defp assign_theme_colors(term) do
-    assign(term,
-      theme_colors: %{
-        bg: Theme.color(term.theme, :bg),
-        text: Theme.color(term.theme, :text),
-        primary: Theme.color(term.theme, :primary),
-        secondary: Theme.color(term.theme, :secondary),
-        muted: Theme.color(term.theme, :muted),
-        accent: Theme.color(term.theme, :accent),
-        panel: Theme.color(term.theme, :panel),
-        surface: Theme.color(term.theme, :surface),
-        stroke: Theme.color(term.theme, :stroke)
-      }
-    )
-  end
+  defp assign_theme_context(term), do: assign(term, ThemeContext.from_term(term))
 
-  defp assign_theme(term, theme_key) do
-    {theme_name, theme} = resolve_theme(theme_key)
-    term = put_theme(term, theme)
-
-    assign(term,
-      theme_name: theme_name,
-      actual_theme_mode: term.theme.mode,
-      theme_status: Theme.probe_status(term.theme) || :ready
-    )
-    |> assign_code_theme(theme_name)
-    |> assign_theme_colors()
-  end
-
-  defp resolve_theme(:system16), do: {:system16, :system16}
-  defp resolve_theme(:system), do: {:system, :system}
-  defp resolve_theme(:nebula), do: {:nebula, Theme.builtin(:nebula)}
-  defp resolve_theme(:catppuccin), do: {:catppuccin, Theme.builtin(:catppuccin)}
-  defp resolve_theme(:dracula), do: {:dracula, Theme.builtin(:dracula)}
-  defp resolve_theme(:gruvbox), do: {:gruvbox, Theme.builtin(:gruvbox)}
-  defp resolve_theme(:nord), do: {:nord, Theme.builtin(:nord)}
-  defp resolve_theme(:solarized_light), do: {:solarized_light, Theme.builtin(:solarized, :light)}
-  defp resolve_theme(_), do: resolve_theme(:nebula)
+  defp normalize_theme({name, theme}), do: {name, theme}
+  defp normalize_theme(theme) when theme in @themes, do: theme
+  defp normalize_theme(_theme), do: :nebula
 end
