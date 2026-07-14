@@ -171,17 +171,6 @@ defmodule EasyBreezy.DeckMarkdownTest do
     assert binary_part(source, start, length) == "---\nlayout: bullets\n---\n\n- One"
   end
 
-  test "loads the absolute source path for editable decks" do
-    path =
-      Path.join(System.tmp_dir!(), "easy-breezy-deck-#{System.unique_integer([:positive])}.md")
-
-    File.write!(path, "# Editable")
-    on_exit(fn -> File.rm(path) end)
-
-    assert %Deck{source_path: source_path, source: "# Editable"} = Markdown.load!(path)
-    assert source_path == Path.expand(path)
-  end
-
   test "preserves markdown before slide separators" do
     assert %Deck{
              slides: [

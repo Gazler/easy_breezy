@@ -343,7 +343,7 @@ defmodule EasyBreezy.SlideshowTest do
     File.write!(path, "# Old")
     on_exit(fn -> File.rm(path) end)
 
-    session = start_session(deck: EasyBreezy.Deck.Markdown.load!(path))
+    session = start_session(deck: EasyBreezy.Deck.Loader.load!(path))
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     input_keys(session, ["i", "e", "d", "d", "i", "# New", "Escape", ":", "wq", "Enter"])
@@ -370,7 +370,7 @@ defmodule EasyBreezy.SlideshowTest do
     File.write!(path, source)
     on_exit(fn -> File.rm(path) end)
 
-    session = start_session(deck: EasyBreezy.Deck.Markdown.load!(path))
+    session = start_session(deck: EasyBreezy.Deck.Loader.load!(path))
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     input_keys(session, ["i", "e", "j"] ++ List.duplicate("l", 6) ++ ["x", ":", "w", "Enter"])

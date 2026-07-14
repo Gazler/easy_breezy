@@ -1,7 +1,7 @@
 defmodule EasyBreezy.DeckMarkdownEditorTest do
   use ExUnit.Case, async: true
 
-  alias EasyBreezy.Deck.Markdown
+  alias EasyBreezy.Deck.{Loader, Markdown}
   alias EasyBreezy.Deck.Markdown.Editor
   alias EasyBreezy.{Deck, Slide}
 
@@ -19,7 +19,7 @@ defmodule EasyBreezy.DeckMarkdownEditorTest do
     File.write!(path, source)
     on_exit(fn -> File.rm(path) end)
 
-    deck = Markdown.load!(path)
+    deck = Loader.load!(path)
     replacement = String.replace(hd(deck.slides).source, "title: Old", "title: New")
 
     assert {:ok, edited, :written} = Editor.save(deck, hd(deck.slides), replacement)
@@ -34,7 +34,7 @@ defmodule EasyBreezy.DeckMarkdownEditorTest do
     File.write!(path, source)
     on_exit(fn -> File.rm(path) end)
 
-    deck = Markdown.load!(path)
+    deck = Loader.load!(path)
 
     assert {:error, message} =
              Editor.save(deck, hd(deck.slides), "---\nlayout bullets\n---\n- One")

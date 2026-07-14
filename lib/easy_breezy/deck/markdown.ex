@@ -5,14 +5,6 @@ defmodule EasyBreezy.Deck.Markdown do
   alias EasyBreezy.Deck.Markdown.FrontmatterParser
   alias EasyBreezy.Deck.Markdown.LineParser
 
-  def load!(path) when is_binary(path) do
-    path = Path.expand(path)
-
-    path
-    |> File.read!()
-    |> parse!(base_path: Path.dirname(path), source_path: path)
-  end
-
   def parse!(source, opts \\ []) when is_binary(source) do
     source = normalize_newlines(source)
 
@@ -21,12 +13,6 @@ defmodule EasyBreezy.Deck.Markdown do
     |> attach_source_ranges(source)
     |> build_deck(Keyword.put(opts, :source, source))
   end
-
-  def markdown_path?(path) when is_binary(path) do
-    Path.extname(path) in [".md", ".markdown"]
-  end
-
-  def markdown_path?(_path), do: false
 
   def content_blocks(source) when is_binary(source) do
     source

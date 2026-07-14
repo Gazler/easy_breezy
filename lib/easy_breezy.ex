@@ -3,6 +3,8 @@ defmodule EasyBreezy do
   Generic slideshow helpers built on top of Breeze.
   """
 
+  alias EasyBreezy.Deck.Loader
+
   @reload_source_extensions [".ex", ".exs"]
   @reload_watch_extensions @reload_source_extensions ++ [".md", ".markdown"]
 
@@ -120,7 +122,7 @@ defmodule EasyBreezy do
 
     case Keyword.get(opts, :deck) do
       path when is_binary(path) ->
-        if EasyBreezy.Deck.Markdown.markdown_path?(path) do
+        if Loader.markdown_path?(path) do
           [Path.dirname(Path.expand(path)) | paths]
         else
           paths
@@ -174,8 +176,8 @@ defmodule EasyBreezy do
   end
 
   defp resolve_deck(path) when is_binary(path) do
-    if EasyBreezy.Deck.Markdown.markdown_path?(path) do
-      EasyBreezy.Deck.Markdown.load!(path)
+    if Loader.markdown_path?(path) do
+      Loader.load!(path)
     else
       path
     end
