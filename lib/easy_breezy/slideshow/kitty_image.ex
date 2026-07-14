@@ -1,6 +1,7 @@
 defmodule EasyBreezy.Slideshow.KittyImage do
   @moduledoc false
 
+  alias EasyBreezy.Media.Cache
   alias EasyBreezy.Slideshow.Gif
 
   @image_id 991_337
@@ -8,8 +9,8 @@ defmodule EasyBreezy.Slideshow.KittyImage do
   @default_inset 1
   @columns 30
   @rows 12
-  @cache __MODULE__.Cache
   @client_animation_interval_ms 25
+  @default_max_source_bytes 64 * 1024 * 1024
 
   def init(_children, root_attrs, last_state) do
     path = Map.get(root_attrs, :"image-path")
@@ -157,11 +158,20 @@ defmodule EasyBreezy.Slideshow.KittyImage do
   defp non_negative_integer(_value, default), do: default
 
   defp build_command(path, columns, rows, image_id, placement_id, signature) do
-    key = {path, columns, rows, image_id, placement_id, signature}
+    key =
+      {__MODULE__, :command, Path.expand(path), signature, columns, rows, image_id, placement_id}
 
-    case cache_lookup(key) do
+    case Cache.fetch(key, fn ->
+           with {:ok, image} <- read_image(path),
+                command when is_binary(command) <-
+                  image_command(image, columns, rows, image_id, placement_id) do
+             {:ok, command}
+           else
+             _error -> {:error, :invalid_image}
+           end
+         end) do
       {:ok, command} -> command
-      :error -> build_and_cache_command(key, path, columns, rows, image_id, placement_id)
+      _error -> nil
     end
   end
 
@@ -177,17 +187,14 @@ defmodule EasyBreezy.Slideshow.KittyImage do
     with {:ok, animation} <- gif_animation(path, signature),
          {frame_index, frame} <- Gif.frame_at(animation, elapsed_ms) do
       key =
-        {:client_animation_frame, path, signature, frame_index, columns, rows, image_id,
-         placement_id}
+        {__MODULE__, :client_animation_frame, Path.expand(path), signature, frame_index, columns,
+         rows, image_id, placement_id}
 
-      case cache_lookup(key) do
-        {:ok, command} ->
-          command
-
-        :error ->
-          command = static_image_command(frame.png, columns, rows, image_id, placement_id)
-          cache_put(key, command)
-          command
+      case Cache.fetch(key, fn ->
+             {:ok, static_image_command(frame.png, columns, rows, image_id, placement_id)}
+           end) do
+        {:ok, command} -> command
+        _error -> nil
       end
     else
       _error -> nil
@@ -195,31 +202,14 @@ defmodule EasyBreezy.Slideshow.KittyImage do
   end
 
   defp gif_animation(path, signature) do
-    key = {:gif_animation, path, signature}
+    key = {__MODULE__, :gif_animation, Path.expand(path), signature}
 
-    case cache_lookup(key) do
-      {:ok, animation} ->
+    Cache.fetch(key, fn ->
+      with {:ok, image} <- read_image(path),
+           {:ok, animation} <- Gif.decode(image) do
         {:ok, animation}
-
-      :error ->
-        with {:ok, image} <- File.read(path),
-             {:ok, animation} <- Gif.decode(image) do
-          cache_put(key, animation)
-          {:ok, animation}
-        end
-    end
-  end
-
-  defp build_and_cache_command(key, path, columns, rows, image_id, placement_id) do
-    command =
-      with {:ok, image} <- File.read(path) do
-        image_command(image, columns, rows, image_id, placement_id)
-      else
-        _ -> nil
       end
-
-    if is_binary(command), do: cache_put(key, command)
-    command
+    end)
   end
 
   defp image_command(<<"GIF8", _rest::binary>> = image, columns, rows, image_id, placement_id) do
@@ -287,19 +277,9 @@ defmodule EasyBreezy.Slideshow.KittyImage do
   end
 
   defp transmit_command(image, first_metadata, continuation_metadata) do
-    chunks = chunk_base64(Base.encode64(image))
-    last_index = length(chunks) - 1
-
-    chunks
-    |> Enum.with_index()
-    |> Enum.map(fn {chunk, index} ->
-      metadata =
-        if index == 0,
-          do: "#{first_metadata},m=#{more?(index, last_index)};",
-          else: "#{continuation_metadata}m=#{more?(index, last_index)};"
-
-      "\e_G" <> metadata <> chunk <> "\e\\"
-    end)
+    image
+    |> Base.encode64()
+    |> transmit_chunks(first_metadata, continuation_metadata, true)
   end
 
   defp animation_control(image_id, controls), do: "\e_Ga=a,i=#{image_id},#{controls}\e\\"
@@ -308,13 +288,37 @@ defmodule EasyBreezy.Slideshow.KittyImage do
   defp kitty_loop_count(nil), do: 2
   defp kitty_loop_count(loop_count), do: loop_count + 1
 
-  defp more?(index, last_index), do: if(index < last_index, do: 1, else: 0)
+  defp transmit_chunks(data, first_metadata, continuation_metadata, first?)
+       when is_binary(data) do
+    transmit_chunks(data, first_metadata, continuation_metadata, first?, [])
+  end
 
-  defp chunk_base64(data) do
-    data
-    |> String.to_charlist()
-    |> Enum.chunk_every(4096)
-    |> Enum.map(&List.to_string/1)
+  defp transmit_chunks(<<>>, _first_metadata, _continuation_metadata, true, []), do: []
+
+  defp transmit_chunks(data, first_metadata, continuation_metadata, first?, commands)
+       when byte_size(data) <= 4096 do
+    metadata =
+      if first?,
+        do: [first_metadata, ",m=0;"],
+        else: [continuation_metadata, "m=0;"]
+
+    Enum.reverse([["\e_G", metadata, data, "\e\\"] | commands])
+  end
+
+  defp transmit_chunks(
+         <<chunk::binary-size(4096), rest::binary>>,
+         first_metadata,
+         continuation_metadata,
+         first?,
+         commands
+       ) do
+    metadata =
+      if first?,
+        do: [first_metadata, ",m=1;"],
+        else: [continuation_metadata, "m=1;"]
+
+    command = ["\e_G", metadata, chunk, "\e\\"]
+    transmit_chunks(rest, first_metadata, continuation_metadata, false, [command | commands])
   end
 
   def delete_command do
@@ -353,34 +357,24 @@ defmodule EasyBreezy.Slideshow.KittyImage do
     @placement_id + :erlang.phash2({scope, path}, 100_000_000)
   end
 
-  defp cache_lookup(key) do
-    ensure_cache!()
+  defp read_image(path) do
+    max_bytes =
+      :easy_breezy
+      |> Application.get_env(__MODULE__, [])
+      |> Keyword.get(:max_source_bytes, @default_max_source_bytes)
+      |> positive_integer_or(@default_max_source_bytes)
 
-    case :ets.lookup(@cache, key) do
-      [{^key, command}] -> {:ok, command}
-      _other -> :error
+    with {:ok, %{size: size}} when size <= max_bytes <- File.stat(path),
+         {:ok, image} <- File.read(path),
+         true <- byte_size(image) <= max_bytes do
+      {:ok, image}
+    else
+      _error -> {:error, :image_too_large_or_unreadable}
     end
   end
 
-  defp cache_put(key, command) do
-    ensure_cache!()
-    :ets.insert(@cache, {key, command})
-    :ok
-  end
-
-  defp ensure_cache! do
-    case :ets.whereis(@cache) do
-      :undefined ->
-        try do
-          :ets.new(@cache, [:named_table, :public, :set])
-        rescue
-          ArgumentError -> :ok
-        end
-
-      _tid ->
-        :ok
-    end
-  end
+  defp positive_integer_or(value, _default) when is_integer(value) and value > 0, do: value
+  defp positive_integer_or(_value, default), do: default
 
   defp truthy?(value), do: value in [true, "true", "1", 1]
 

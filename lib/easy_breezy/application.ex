@@ -8,7 +8,8 @@ defmodule EasyBreezy.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {EasyBreezy.PresenterSync.Supervisor, []}
+      {EasyBreezy.PresenterSync.Supervisor, []},
+      {EasyBreezy.Media.Supervisor, []}
     ]
 
     opts = [strategy: :one_for_one, name: EasyBreezy.Supervisor]
