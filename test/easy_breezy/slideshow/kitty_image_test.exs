@@ -65,6 +65,36 @@ defmodule EasyBreezy.Slideshow.KittyImageTest do
     assert overlay.content =~ "c=20,r=9"
   end
 
+  test "chunks large image payloads without building character lists" do
+    box = %{id: "slide-image"}
+    path = Path.join(System.tmp_dir!(), "easy_breezy_kitty_chunked_image_test.img")
+    File.write!(path, :binary.copy(<<1>>, 3_100))
+    context = %{layout: %{left: 0, top: 0, width: 20, height: 9}}
+    state = %{active?: true, mode: "show", path: path, scope: "presentation:full"}
+
+    assert {:ok, ^box, overlays: [%{content: command}]} =
+             KittyImage.animate(:root, box, [], state, context)
+
+    assert length(:binary.matches(command, "\e_G")) == 3
+    assert command =~ ",m=1;"
+    assert command =~ "\e_Gq=2,m=0;"
+  end
+
+  test "rejects source images over the size limit" do
+    box = %{id: "slide-image"}
+    path = Path.join(System.tmp_dir!(), "easy_breezy_kitty_oversized_image_test.img")
+
+    {:ok, file} = :file.open(path, [:write, :binary])
+    {:ok, _position} = :file.position(file, 64 * 1024 * 1024)
+    :ok = :file.write(file, <<0>>)
+    :ok = :file.close(file)
+
+    context = %{layout: %{left: 0, top: 0, width: 20, height: 9}}
+    state = %{active?: true, mode: "show", path: path, scope: "presentation:full"}
+
+    assert KittyImage.animate(:root, box, [], state, context) == box
+  end
+
   test "decodes GIFs into terminal-driven Kitty animation frames" do
     gif =
       Base.decode64!(

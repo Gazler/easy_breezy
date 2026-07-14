@@ -8,22 +8,10 @@ defmodule EasyBreezy.Slideshow.Gif do
   @max_canvas_pixels 16_777_216
   @max_animation_pixels 33_554_432
   @max_frames 256
-  @cache __MODULE__.Cache
   @default_graphics_control %{delay_ms: @default_delay_ms, disposal: 0, transparent: nil}
 
   def decode(data) when is_binary(data) do
-    ensure_cache!()
-    key = {:gif, data}
-
-    case :ets.lookup(@cache, key) do
-      [{^key, result}] ->
-        result
-
-      _other ->
-        result = decode_data(data)
-        :ets.insert(@cache, {key, result})
-        result
-    end
+    decode_data(data)
   end
 
   def decode(_data), do: {:error, :invalid_gif}
@@ -530,19 +518,5 @@ defmodule EasyBreezy.Slideshow.Gif do
       data,
       <<:erlang.crc32(type <> data)::unsigned-big-integer-size(32)>>
     ]
-  end
-
-  defp ensure_cache! do
-    case :ets.whereis(@cache) do
-      :undefined ->
-        try do
-          :ets.new(@cache, [:named_table, :public, :set, read_concurrency: true])
-        rescue
-          ArgumentError -> :ok
-        end
-
-      _tid ->
-        :ok
-    end
   end
 end
