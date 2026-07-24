@@ -109,8 +109,7 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
           Mermaid.render_lines(
             source,
             markdown_width,
-            markdown_height,
-            assigns.render_context
+            markdown_height
           )
 
         %{type: :mermaid, class: class, lines: lines}

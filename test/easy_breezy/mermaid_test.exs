@@ -1,6 +1,7 @@
 defmodule EasyBreezy.MermaidTest do
   use ExUnit.Case, async: true
 
+  alias BackBreeze.TextSpan
   alias EasyBreezy.{Deck, Slide}
   alias EasyBreezy.Components.Mermaid, as: MermaidComponent
   alias EasyBreezy.Deck.Markdown
@@ -182,14 +183,28 @@ defmodule EasyBreezy.MermaidTest do
 
     assert graph.class_defs == %{"examplecolor" => %{color: "#ff00ff"}}
     assert graph.nodes["ColorText"].class_name == "examplecolor"
+    assert graph.nodes["ColorText"].text_style == %{foreground_color: {255, 0, 255}}
 
     assert render_ascii(source) == "[A]──▶ [ColorText]"
 
-    assert {:ok, lines} = Mermaid.render(source, 80, 20, truncate?: false, ansi_restore: "<r>")
-    assert Enum.join(lines, "\n") =~ "\e[38;2;255;0;255mColorText<r>"
+    assert {:ok, lines} = Mermaid.render(source, 80, 20, truncate?: false)
+
+    assert %TextSpan{
+             text: "ColorText",
+             style: %{foreground_color: {255, 0, 255}}
+           } in List.flatten(lines)
+
+    refute Enum.any?(lines, &(line_text(&1) =~ "\e["))
+
+    assert {:ok, wrapped_lines} = Mermaid.render(source, 8, 20, truncate?: false)
+
+    assert wrapped_lines
+           |> List.flatten()
+           |> Enum.filter(&(&1.style == %{foreground_color: {255, 0, 255}}))
+           |> Enum.map_join(& &1.text) == "ColorText"
   end
 
-  test "component restores class colors without painting line backgrounds" do
+  test "component emits semantic class colors without line backgrounds" do
     source = """
     flowchart TD
       classDef otpcolor color:#00ff66
@@ -198,15 +213,18 @@ defmodule EasyBreezy.MermaidTest do
       termite --> other
     """
 
-    {_class, lines} =
-      MermaidComponent.render_lines(source, 80, 20, %{
-        theme_colors: %{secondary: {102, 217, 239}, panel: {31, 70, 98}}
-      })
+    {_class, lines} = MermaidComponent.render_lines(source, 80, 20)
 
-    otp_line = Enum.find(lines, &String.contains?(&1, "otp"))
+    otp_line = Enum.find(lines, &(line_text(&1) =~ "otp"))
 
-    assert otp_line =~ "\e[38;2;0;255;102motp\e[38;2;102;217;239m"
-    refute otp_line =~ "\e[48;"
+    assert %TextSpan{
+             text: "otp",
+             style: %{foreground_color: {0, 255, 102}}
+           } in otp_line
+
+    refute Enum.any?(otp_line, fn %TextSpan{style: style} ->
+             Map.has_key?(style, :background_color)
+           end)
   end
 
   test "mermaid component stays clipped inside a two-column slide" do
@@ -313,14 +331,16 @@ defmodule EasyBreezy.MermaidTest do
   end
 
   defp render_ascii(source) do
-    {:ok, lines} = Mermaid.render(source, 80, 30, truncate?: false, ansi_restore: "")
+    {:ok, lines} = Mermaid.render(source, 80, 30, truncate?: false)
 
     lines
-    |> Enum.join("\n")
-    |> BackBreeze.Utils.strip_escape_chars()
+    |> Enum.map_join("\n", &line_text/1)
   end
 
   defp ascii_snapshot(lines), do: Enum.join(lines, "\n")
+
+  defp line_text(line) when is_binary(line), do: line
+  defp line_text(spans), do: Enum.map_join(spans, & &1.text)
 
   defp line_containing(lines, content), do: Enum.find(lines, &String.contains?(&1, content))
 

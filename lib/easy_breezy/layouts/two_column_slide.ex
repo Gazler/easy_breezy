@@ -140,7 +140,6 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
             source={@left_mermaid_source || ""}
             width={@left_mermaid_width}
             height={@left_content_height}
-            render_context={@render_context}
           />
           <box
             :if={@left_mode == :image}
@@ -173,7 +172,6 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
             source={@right_mermaid_source || ""}
             width={@right_mermaid_width}
             height={@right_content_height}
-            render_context={@render_context}
           />
           <box
             :if={@right_mode == :image}

@@ -115,7 +115,7 @@ defmodule EasyBreezy.Layouts.BulletsSlide do
         }
 
       {%{type: :mermaid, content: source}, _next_block} ->
-        {class, lines} = Mermaid.render_lines(source, width, height, assigns.render_context)
+        {class, lines} = Mermaid.render_lines(source, width, height)
         %{type: :mermaid, class: class, lines: lines}
 
       {%{type: :breeze, content: source}, _next_block} ->

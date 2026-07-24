@@ -1,6 +1,7 @@
 defmodule EasyBreezy.Mermaid do
   @moduledoc false
 
+  alias BackBreeze.{TextLayout, TextSpan}
   alias EasyBreezy.Mermaid.Parser
 
   defmodule Graph do
@@ -10,12 +11,17 @@ defmodule EasyBreezy.Mermaid do
 
   defmodule Node do
     @moduledoc false
-    defstruct [:id, :label, :class_name, shape: :box]
+    defstruct [:id, :label, :class_name, shape: :box, text_style: %{}]
   end
 
   defmodule Edge do
     @moduledoc false
     defstruct [:from, :to, :label]
+  end
+
+  defmodule StyledLine do
+    @moduledoc false
+    defstruct text: "", ranges: []
   end
 
   def render(source, width, height) when is_binary(source) do
@@ -24,8 +30,7 @@ defmodule EasyBreezy.Mermaid do
 
   def render(source, width, height, opts) when is_binary(source) and is_list(opts) do
     with {:ok, graph} <- parse(source) do
-      ansi_restore = Keyword.get(opts, :ansi_restore, IO.ANSI.reset())
-      rendered_lines = render_graph(graph, max(width, 1), ansi_restore)
+      rendered_lines = render_graph(graph, max(width, 1))
 
       lines =
         if Keyword.get(opts, :truncate?, true) do
@@ -52,7 +57,9 @@ defmodule EasyBreezy.Mermaid do
   end
 
   defp build_graph(direction, statements) do
-    parse_statements(statements, %Graph{direction: direction})
+    with {:ok, graph} <- parse_statements(statements, %Graph{direction: direction}) do
+      {:ok, attach_node_styles(graph)}
+    end
   end
 
   defp parse_statements(statements, graph) do
@@ -63,6 +70,39 @@ defmodule EasyBreezy.Mermaid do
       end
     end)
   end
+
+  defp attach_node_styles(graph) do
+    nodes =
+      Map.new(graph.nodes, fn {id, node} ->
+        {id, %{node | text_style: node_text_style(node, graph.class_defs)}}
+      end)
+
+    %{graph | nodes: nodes}
+  end
+
+  defp node_text_style(%Node{class_name: nil}, _class_defs), do: %{}
+
+  defp node_text_style(%Node{class_name: class_name}, class_defs) do
+    with %{color: color} <- Map.get(class_defs, class_name),
+         {red, green, blue} <- parse_hex_color(color) do
+      %{foreground_color: {red, green, blue}}
+    else
+      _ -> %{}
+    end
+  end
+
+  defp parse_hex_color("#" <> hex) do
+    with <<red_hex::binary-size(2), green_hex::binary-size(2), blue_hex::binary-size(2)>> <- hex,
+         {red, ""} <- Integer.parse(red_hex, 16),
+         {green, ""} <- Integer.parse(green_hex, 16),
+         {blue, ""} <- Integer.parse(blue_hex, 16) do
+      {red, green, blue}
+    else
+      _ -> nil
+    end
+  end
+
+  defp parse_hex_color(_color), do: nil
 
   defp parse_statement({:edge, parsed}, graph), do: add_edge(graph, parsed)
 
@@ -144,22 +184,22 @@ defmodule EasyBreezy.Mermaid do
   defp merge_node(existing, node),
     do: %{node | class_name: node.class_name || existing.class_name}
 
-  defp render_graph(%Graph{direction: :lr} = graph, width, ansi_restore) do
+  defp render_graph(%Graph{direction: :lr} = graph, _width) do
     {forward_edges, _feedback_edges} = split_edges(graph.edges)
     graph = %{graph | edges: forward_edges}
 
     graph
     |> layers()
-    |> render_lr(graph, width, ansi_restore)
+    |> render_lr(graph)
   end
 
-  defp render_graph(graph, width, ansi_restore) do
+  defp render_graph(graph, width) do
     {forward_edges, feedback_edges} = split_edges(graph.edges)
     layout_graph = %{graph | edges: forward_edges}
 
     layout_graph
     |> layers()
-    |> render_td(layout_graph, feedback_edges, width, ansi_restore)
+    |> render_td(layout_graph, feedback_edges, width)
   end
 
   defp split_edges(edges) do
@@ -209,12 +249,12 @@ defmodule EasyBreezy.Mermaid do
     |> Enum.map(fn {_rank, ids} -> ids end)
   end
 
-  defp render_td(layers, graph, feedback_edges, width, ansi_restore) do
+  defp render_td(layers, graph, feedback_edges, width) do
     feedback_padding = if feedback_edges == [], do: 0, else: 1
 
     rendered_layers =
       Enum.map(layers, fn ids ->
-        {node_lines, positions} = render_td_layer(ids, graph, width, ansi_restore)
+        {node_lines, positions} = render_td_layer(ids, graph, width)
         %{lines: node_lines, positions: positions}
       end)
       |> align_td_layers(graph)
@@ -259,7 +299,10 @@ defmodule EasyBreezy.Mermaid do
       List.duplicate("", feedback_padding) ++
         Enum.flat_map(chunks, & &1.lines) ++ List.duplicate("", feedback_padding)
 
-    render_td_feedback_edges(lines, chunks, feedback_edges, width)
+    lines
+    |> render_td_feedback_edges(chunks, feedback_edges, width)
+    |> Enum.map(&styled_line/1)
+    |> add_td_node_styles(chunks, graph)
   end
 
   defp render_td_feedback_edges(lines, _chunks, [], _width), do: lines
@@ -343,10 +386,10 @@ defmodule EasyBreezy.Mermaid do
     Enum.map(lines, fn line -> line |> Enum.join() |> String.trim_trailing() end)
   end
 
-  defp render_td_layer(ids, graph, width, ansi_restore) do
+  defp render_td_layer(ids, graph, width) do
     box_entries =
       for id <- ids do
-        box = node_box(Map.fetch!(graph.nodes, id), graph.class_defs, ansi_restore)
+        box = node_box(Map.fetch!(graph.nodes, id))
         [top | _] = box
         {id, box, String.length(top)}
       end
@@ -599,29 +642,25 @@ defmodule EasyBreezy.Mermaid do
     end
   end
 
-  defp render_lr(layers, graph, width, ansi_restore) do
-    layer_text =
+  defp render_lr(layers, graph) do
+    layer_lines =
       Enum.map(layers, fn ids ->
-        ids
-        |> Enum.map(fn id ->
-          one_line_node(Map.fetch!(graph.nodes, id), graph.class_defs, ansi_restore)
+        Enum.map(ids, fn id ->
+          one_line_node(Map.fetch!(graph.nodes, id))
         end)
-        |> Enum.join("\n")
       end)
 
-    layer_text
+    layer_lines
     |> Enum.with_index()
-    |> Enum.map(fn {text, index} ->
-      if index == length(layer_text) - 1 do
-        text
+    |> Enum.map(fn {lines, index} ->
+      if index == length(layer_lines) - 1 do
+        lines
       else
         label = outgoing_label(Enum.at(layers, index), Enum.at(layers, index + 1), graph)
-        text <> lr_arrow(label) <> " "
+        List.update_at(lines, -1, &append_text(&1, lr_arrow(label) <> " "))
       end
     end)
-    |> Enum.join("")
-    |> String.split("\n")
-    |> Enum.flat_map(&wrap_cells(&1, width))
+    |> Enum.reduce([], &append_line_group/2)
   end
 
   defp outgoing_label(from_ids, to_ids, graph) do
@@ -634,10 +673,9 @@ defmodule EasyBreezy.Mermaid do
   defp lr_arrow(""), do: "──▶"
   defp lr_arrow(label), do: "─#{label}─▶"
 
-  defp node_box(%Node{label: label, shape: shape} = node, class_defs, ansi_restore) do
+  defp node_box(%Node{label: label, shape: shape}) do
     label = label || ""
     width = String.length(label) + 2
-    rendered_label = colorize(label, node_color(node, class_defs), ansi_restore)
 
     case shape do
       :diamond ->
@@ -645,54 +683,94 @@ defmodule EasyBreezy.Mermaid do
 
         [
           "┌" <> String.duplicate("─", width) <> "┐",
-          "│‹ " <> rendered_label <> " ›│",
+          "│‹ " <> label <> " ›│",
           "└" <> String.duplicate("─", width) <> "┘"
         ]
 
       :round ->
         [
           "╭" <> String.duplicate("─", width) <> "╮",
-          "│ " <> rendered_label <> " │",
+          "│ " <> label <> " │",
           "╰" <> String.duplicate("─", width) <> "╯"
         ]
 
       _shape ->
         [
           "┌" <> String.duplicate("─", width) <> "┐",
-          "│ " <> rendered_label <> " │",
+          "│ " <> label <> " │",
           "└" <> String.duplicate("─", width) <> "┘"
         ]
     end
   end
 
-  defp one_line_node(%Node{label: label, shape: :diamond} = node, class_defs, ansi_restore),
-    do: "<#{colorize(label, node_color(node, class_defs), ansi_restore)}>"
+  defp one_line_node(%Node{shape: :diamond} = node),
+    do: styled_node_line("<", node, ">")
 
-  defp one_line_node(%Node{label: label, shape: :round} = node, class_defs, ansi_restore),
-    do: "(#{colorize(label, node_color(node, class_defs), ansi_restore)})"
+  defp one_line_node(%Node{shape: :round} = node),
+    do: styled_node_line("(", node, ")")
 
-  defp one_line_node(%Node{label: label} = node, class_defs, ansi_restore),
-    do: "[#{colorize(label, node_color(node, class_defs), ansi_restore)}]"
+  defp one_line_node(%Node{} = node),
+    do: styled_node_line("[", node, "]")
 
-  defp node_color(%Node{class_name: nil}, _class_defs), do: nil
+  defp add_td_node_styles(lines, chunks, graph) do
+    Enum.reduce(chunks, lines, fn chunk, lines ->
+      Enum.reduce(chunk.positions, lines, fn {id, position}, lines ->
+        node = Map.fetch!(graph.nodes, id)
 
-  defp node_color(%Node{class_name: class_name}, class_defs) do
-    class_defs
-    |> Map.get(class_name, %{})
-    |> Map.get(:color)
+        if node.text_style == %{} do
+          lines
+        else
+          List.update_at(lines, chunk.node_top + 1, fn line ->
+            add_range(
+              line,
+              position.left + td_label_offset(node.shape),
+              String.length(node.label || ""),
+              node.text_style
+            )
+          end)
+        end
+      end)
+    end)
   end
 
-  defp colorize(text, nil, _ansi_restore), do: text
+  defp td_label_offset(:diamond), do: 3
+  defp td_label_offset(_shape), do: 2
 
-  defp colorize(text, "#" <> hex, ansi_restore) do
-    with <<red_hex::binary-size(2), green_hex::binary-size(2), blue_hex::binary-size(2)>> <- hex,
-         {red, ""} <- Integer.parse(red_hex, 16),
-         {green, ""} <- Integer.parse(green_hex, 16),
-         {blue, ""} <- Integer.parse(blue_hex, 16) do
-      "\e[38;2;#{red};#{green};#{blue}m#{text}#{ansi_restore}"
-    else
-      _ -> text
-    end
+  defp styled_node_line(prefix, %Node{label: label, text_style: style}, suffix) do
+    label = label || ""
+
+    (prefix <> label <> suffix)
+    |> styled_line()
+    |> add_range(String.length(prefix), String.length(label), style)
+  end
+
+  defp styled_line(text), do: %StyledLine{text: text}
+
+  defp add_range(%StyledLine{} = line, _start, _length, style) when style == %{}, do: line
+  defp add_range(%StyledLine{} = line, _start, 0, _style), do: line
+
+  defp add_range(%StyledLine{} = line, start, length, style) do
+    %{line | ranges: line.ranges ++ [{start, length, style}]}
+  end
+
+  defp append_text(%StyledLine{} = line, text), do: %{line | text: line.text <> text}
+
+  defp append_line_group([], lines), do: lines
+  defp append_line_group(lines, []), do: lines
+
+  defp append_line_group([first | rest], lines) do
+    List.update_at(lines, -1, &append_line(&1, first)) ++ rest
+  end
+
+  defp append_line(%StyledLine{} = left, %StyledLine{} = right) do
+    offset = String.length(left.text)
+
+    shifted_ranges =
+      Enum.map(right.ranges, fn {start, length, style} ->
+        {start + offset, length, style}
+      end)
+
+    %StyledLine{text: left.text <> right.text, ranges: left.ranges ++ shifted_ranges}
   end
 
   defp fit_lines(lines, width, height) do
@@ -701,27 +779,50 @@ defmodule EasyBreezy.Mermaid do
     |> Enum.take(height)
   end
 
-  defp wrap_lines(lines, width), do: Enum.flat_map(lines, &wrap_cells(&1, width))
+  defp wrap_lines(lines, width), do: Enum.flat_map(lines, &wrap_styled_line(&1, width))
 
-  defp wrap_cells("", _width), do: [""]
+  defp wrap_styled_line(%StyledLine{text: ""}, _width), do: [[TextSpan.new("")]]
 
-  defp wrap_cells(line, width) do
-    line
-    |> BackBreeze.String.reflow(width, break: :char)
-    |> String.split("\n")
-    |> remove_trailing_empty_line()
+  defp wrap_styled_line(%StyledLine{} = line, width) do
+    prepared =
+      line
+      |> line_to_spans()
+      |> TextLayout.prepare(width, :auto, 0)
+
+    prepared
+    |> TextLayout.visible_lines(0, prepared.raw_line_count)
+    |> Enum.map(fn segments ->
+      Enum.map(segments, fn {text, style} -> TextSpan.new(text, style) end)
+    end)
+  end
+
+  defp line_to_spans(%StyledLine{} = line) do
+    line.text
+    |> String.graphemes()
+    |> Enum.with_index()
+    |> Enum.reduce([], fn {grapheme, index}, spans ->
+      style = style_at(line.ranges, index)
+
+      case spans do
+        [%TextSpan{text: text, style: ^style} = span | rest] ->
+          [%{span | text: text <> grapheme} | rest]
+
+        _other ->
+          [TextSpan.new(grapheme, style) | spans]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp style_at(ranges, index) do
+    Enum.find_value(ranges, %{}, fn {start, length, style} ->
+      if index >= start and index < start + length, do: style
+    end)
   end
 
   defp spaces(count), do: String.duplicate(" ", max(count, 0))
   defp blank_chars(width), do: List.duplicate(" ", width)
   defp visible_length(line), do: BackBreeze.Utils.string_length(line)
-
-  defp remove_trailing_empty_line(lines) do
-    case Enum.reverse(lines) do
-      ["" | rest] -> Enum.reverse(rest)
-      _lines -> lines
-    end
-  end
 
   defp put_text(line, text, start) do
     text
