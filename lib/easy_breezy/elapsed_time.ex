@@ -20,11 +20,17 @@ defmodule EasyBreezy.ElapsedTime do
   def started_at_ms_from_elapsed(_elapsed_ms, now_ms) when is_integer(now_ms), do: now_ms
 
   def label(started_at_ms, now_ms \\ System.monotonic_time(:millisecond)) do
-    total_seconds = div(elapsed_ms(started_at_ms, now_ms), 1_000)
+    started_at_ms
+    |> elapsed_ms(now_ms)
+    |> label_from_elapsed()
+  end
+
+  def label_from_elapsed(elapsed_ms, prefix \\ "Elapsed") do
+    total_seconds = div(max(elapsed_ms, 0), 1_000)
     minutes = div(total_seconds, 60)
     seconds = rem(total_seconds, 60)
 
-    "Elapsed #{pad2(minutes)}:#{pad2(seconds)}"
+    "#{prefix} #{pad2(minutes)}:#{pad2(seconds)}"
   end
 
   defp pad2(int) when int >= 0 and int < 10, do: "0#{int}"

@@ -190,6 +190,8 @@ defmodule EasyBreezy do
     |> maybe_put_assign(assigns, :slide_index)
     |> maybe_put_assign(assigns, :step)
     |> maybe_put_assign(assigns, :started_at_ms)
+    |> maybe_put_assign(assigns, :timer_paused?)
+    |> maybe_put_assign(assigns, :paused_elapsed_ms)
     |> maybe_put_assign(assigns, :source_editor)
     |> maybe_put_assign(assigns, :source_save_notice)
     |> maybe_put_assign(assigns, :source_mode?)

@@ -124,6 +124,74 @@ defmodule EasyBreezy.PresenterViewTest do
     assert_receive {:easy_breezy_presenter_command, _pid, :reset_timer}
   end
 
+  test "p pauses and resumes the presentation timer" do
+    sync_name = {:easy_breezy_pause_timer_test, System.unique_integer([:positive])}
+    EasyBreezy.PresenterSync.register(sync_name)
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: text_deck(), theme: :nebula, sync_name: sync_name]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert_receive {:easy_breezy_presenter_subscribe, _pid}
+
+    Breeze.Test.info(
+      session,
+      {:easy_breezy_presentation_state,
+       presentation_payload(text_deck(), 0)
+       |> Map.put(:elapsed_ms, 125_000)
+       |> Map.put(:timer_paused?, false)}
+    )
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "p")
+
+    assigns = Breeze.Test.metadata(session).assigns
+    assert assigns.timer_paused?
+    assert is_integer(assigns.paused_elapsed_ms)
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Paused 02:05"
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "p resume"
+    assert_receive {:easy_breezy_presenter_command, _pid, :toggle_timer_pause}
+
+    Breeze.Test.info(session, :clock_tick)
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Paused 02:05"
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "p")
+
+    assigns = Breeze.Test.metadata(session).assigns
+    refute assigns.timer_paused?
+    assert is_nil(assigns.paused_elapsed_ms)
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Elapsed 02:05"
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "p pause"
+    assert_receive {:easy_breezy_presenter_command, _pid, :toggle_timer_pause}
+  end
+
+  test "restores a paused timer from presentation state" do
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: text_deck(), theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    payload =
+      text_deck()
+      |> presentation_payload(0)
+      |> Map.merge(%{elapsed_ms: 125_000, timer_paused?: true})
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+
+    assigns = Breeze.Test.metadata(session).assigns
+    assert assigns.timer_paused?
+    assert assigns.paused_elapsed_ms == 125_000
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Paused 02:05"
+  end
+
   test "resubscribes when a reloaded presentation replaces its root process" do
     sync_name = {:easy_breezy_reload_test, System.unique_integer([:positive])}
     first = start_sync_target(sync_name, self())
@@ -209,6 +277,28 @@ defmodule EasyBreezy.PresenterViewTest do
 
     assert plain =~
              "┌────────────────────────────────────────────────────────────────────────────────────┐ ┌Next: Why Breeze"
+  end
+
+  test "next markdown preview restores inline styles to its panel background" do
+    deck = markdown_preview_deck()
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+
+    rendered = Breeze.Test.render!(session)
+    panel_restore = "\e[48;2;31;70;98;38;2;214;231;255m"
+    surface_restore = "\e[48;2;25;53;73;38;2;214;231;255m"
+
+    assert rendered =~ "\e[36m#{panel_restore} is th"
+    refute rendered =~ "\e[36m#{surface_restore} is th"
   end
 
   test "next preview shows a placeholder for live slides" do
@@ -654,6 +744,27 @@ defmodule EasyBreezy.PresenterViewTest do
           title: "Why Breeze",
           layout: :bullets,
           payload: text_payload("Why Breeze")
+        }
+      ]
+    }
+  end
+
+  defp markdown_preview_deck do
+    markdown = "- `Termite.Screen` is the escape-sequence layer"
+
+    %Deck{
+      title: "Presenter Test",
+      slides: [
+        %Slide{id: :intro, title: "Intro", layout: :bullets, payload: text_payload("Intro")},
+        %Slide{
+          id: :termite_screen,
+          title: "Termite Screen API",
+          layout: :markdown,
+          payload: %{
+            title: "Termite Screen API",
+            markdown: markdown,
+            markdown_blocks: Markdown.content_blocks(markdown)
+          }
         }
       ]
     }

@@ -206,6 +206,32 @@ defmodule EasyBreezy.SlideshowTest do
     assert Breeze.Test.metadata(session).assigns.started_at_ms > started_at_ms
   end
 
+  test "the presenter pause command freezes and resumes the presentation timer" do
+    session = start_session(start_opts: [presenter_mode: :presentation])
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.info(session, {:easy_breezy_presenter_subscribe, self()})
+    assert_receive {:easy_breezy_presentation_state, _payload}
+
+    Breeze.Test.info(
+      session,
+      {:easy_breezy_presenter_command, self(), :toggle_timer_pause}
+    )
+
+    paused_assigns = Breeze.Test.metadata(session).assigns
+    assert paused_assigns.timer_paused?
+    assert is_integer(paused_assigns.paused_elapsed_ms)
+
+    Breeze.Test.info(
+      session,
+      {:easy_breezy_presenter_command, self(), :toggle_timer_pause}
+    )
+
+    resumed_assigns = Breeze.Test.metadata(session).assigns
+    refute resumed_assigns.timer_paused?
+    assert is_nil(resumed_assigns.paused_elapsed_ms)
+  end
+
   test "i toggles the current slide markdown source" do
     deck =
       EasyBreezy.Deck.Markdown.parse!("""
@@ -289,15 +315,27 @@ defmodule EasyBreezy.SlideshowTest do
     assert [start_opts: start_opts] =
              EasyBreezy.refresh_server_opts(
                [deck: fn -> deck() end],
-               %{metadata: %{assigns: %{started_at_ms: started_at_ms}}}
+               %{
+                 metadata: %{
+                   assigns: %{
+                     started_at_ms: started_at_ms,
+                     timer_paused?: true,
+                     paused_elapsed_ms: 125_000
+                   }
+                 }
+               }
              )
 
     assert Keyword.fetch!(start_opts, :started_at_ms) == started_at_ms
+    assert Keyword.fetch!(start_opts, :timer_paused?)
+    assert Keyword.fetch!(start_opts, :paused_elapsed_ms) == 125_000
 
     session = start_session(start_opts: start_opts)
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert Breeze.Test.metadata(session).assigns.started_at_ms == started_at_ms
+    assert Breeze.Test.metadata(session).assigns.timer_paused?
+    assert Breeze.Test.metadata(session).assigns.paused_elapsed_ms == 125_000
   end
 
   test "passes the header theme status option through to the slideshow" do

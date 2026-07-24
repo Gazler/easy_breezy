@@ -95,7 +95,8 @@ defmodule EasyBreezy.Examples.BreezeDeck do
               "A timer and next-slide preview remove guesswork."
             ],
             notes: [
-              "Mention that p toggles the footer into presenter mode.",
+              "In a single terminal, p toggles the presenter footer.",
+              "In the dedicated presenter view, p pauses or resumes the timer.",
               "Notes do not need a second process if a single terminal is enough.",
               "A second-screen transport could be added later."
             ]

@@ -5,6 +5,7 @@ defmodule EasyBreezy.ElapsedTimeTest do
 
   test "labels elapsed time" do
     assert ElapsedTime.label(1_000, 126_000) == "Elapsed 02:05"
+    assert ElapsedTime.label_from_elapsed(125_000, "Paused") == "Paused 02:05"
   end
 
   test "clamps future start times" do

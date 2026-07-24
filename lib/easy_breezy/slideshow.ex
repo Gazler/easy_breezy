@@ -40,6 +40,13 @@ defmodule EasyBreezy.Slideshow do
     started_at_ms =
       Keyword.get_lazy(opts, :started_at_ms, fn -> System.monotonic_time(:millisecond) end)
 
+    timer_paused? = Keyword.get(opts, :timer_paused?, false)
+
+    paused_elapsed_ms =
+      if timer_paused? do
+        Keyword.get_lazy(opts, :paused_elapsed_ms, fn -> ElapsedTime.elapsed_ms(started_at_ms) end)
+      end
+
     term =
       term
       |> maybe_enter_alt_screen(opts)
@@ -63,6 +70,8 @@ defmodule EasyBreezy.Slideshow do
         live_state: %{},
         themes: Keyword.get(opts, :themes, @themes),
         started_at_ms: started_at_ms,
+        timer_paused?: timer_paused?,
+        paused_elapsed_ms: paused_elapsed_ms,
         goto_modal?: false,
         goto_slide_input: "",
         goto_slide_error: nil
@@ -98,6 +107,7 @@ defmodule EasyBreezy.Slideshow do
         render_context: %{
           theme_colors: assigns.theme_colors,
           code_theme: assigns.code_theme,
+          background: :surface,
           animate_title_gradient?: true,
           image_scope: "presentation"
         }
@@ -744,7 +754,8 @@ defmodule EasyBreezy.Slideshow do
       screen_height: assigns.screen_height,
       presenter?: assigns.presenter?,
       started_at_ms: assigns.started_at_ms,
-      elapsed_ms: ElapsedTime.elapsed_ms(assigns.started_at_ms),
+      elapsed_ms: timer_elapsed_ms(assigns),
+      timer_paused?: assigns.timer_paused?,
       source_mode?: assigns.source_mode?,
       source_editor: SourceEditor.snapshot(assigns.source_editor),
       theme_name: assigns.theme_name,
@@ -775,6 +786,7 @@ defmodule EasyBreezy.Slideshow do
               :end,
               :cycle_theme,
               :reset_timer,
+              :toggle_timer_pause,
               :toggle_source_mode,
               :edit_source
             ],
@@ -820,8 +832,19 @@ defmodule EasyBreezy.Slideshow do
   end
 
   defp handle_presenter_command(:reset_timer, term) do
+    started_at_ms = System.monotonic_time(:millisecond)
+
     term
-    |> assign(started_at_ms: System.monotonic_time(:millisecond))
+    |> assign(
+      started_at_ms: started_at_ms,
+      paused_elapsed_ms: if(term.assigns.timer_paused?, do: 0, else: nil)
+    )
+    |> maybe_publish_presentation_soon()
+  end
+
+  defp handle_presenter_command(:toggle_timer_pause, term) do
+    term
+    |> toggle_timer_pause()
     |> maybe_publish_presentation_soon()
   end
 
@@ -1117,6 +1140,29 @@ defmodule EasyBreezy.Slideshow do
       _source -> assign(term, source_editor: nil)
     end
   end
+
+  defp toggle_timer_pause(%{assigns: %{timer_paused?: true}} = term) do
+    elapsed_ms = timer_elapsed_ms(term.assigns)
+
+    assign(term,
+      started_at_ms: ElapsedTime.started_at_ms_from_elapsed(elapsed_ms),
+      timer_paused?: false,
+      paused_elapsed_ms: nil
+    )
+  end
+
+  defp toggle_timer_pause(term) do
+    assign(term,
+      timer_paused?: true,
+      paused_elapsed_ms: ElapsedTime.elapsed_ms(term.assigns.started_at_ms)
+    )
+  end
+
+  defp timer_elapsed_ms(%{timer_paused?: true, paused_elapsed_ms: elapsed_ms})
+       when is_integer(elapsed_ms),
+       do: max(elapsed_ms, 0)
+
+  defp timer_elapsed_ms(assigns), do: ElapsedTime.elapsed_ms(assigns.started_at_ms)
 
   defp handle_source_editor_event(term, event) do
     case SourceEditor.handle_key(term.assigns.source_editor, event) do

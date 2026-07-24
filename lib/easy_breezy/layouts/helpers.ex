@@ -2,15 +2,23 @@ defmodule EasyBreezy.Layouts.Helpers do
   @moduledoc false
 
   def bullet_line(text, width, render_context \\ %{}, opts \\ []) do
-    reset =
-      markdown_reset(
-        render_context,
-        Keyword.get(opts, :background, :surface),
-        Keyword.get(opts, :foreground, :text)
-      )
-
-    EasyBreezy.Markdown.render_bullet(text, max(width, 1), reset: reset)
+    EasyBreezy.Markdown.render_bullet(text, max(width, 1),
+      reset: markdown_reset(render_context, opts)
+    )
   end
+
+  def markdown_reset(render_context, opts \\ [])
+
+  def markdown_reset(%{theme_colors: theme_colors} = render_context, opts) do
+    background = Keyword.get(opts, :background, Map.get(render_context, :background, :surface))
+    foreground = Keyword.get(opts, :foreground, :text)
+
+    theme_colors
+    |> Map.get(background)
+    |> ansi_reset(Map.get(theme_colors, foreground))
+  end
+
+  def markdown_reset(_render_context, _opts), do: IO.ANSI.reset()
 
   def wrap_code_line("", _width), do: [""]
 
@@ -35,14 +43,6 @@ defmodule EasyBreezy.Layouts.Helpers do
 
     Enum.reverse([current | lines])
   end
-
-  defp markdown_reset(%{theme_colors: theme_colors}, background, foreground) do
-    theme_colors
-    |> Map.get(background)
-    |> ansi_reset(Map.get(theme_colors, foreground))
-  end
-
-  defp markdown_reset(_render_context, _background, _foreground), do: IO.ANSI.reset()
 
   defp ansi_reset({br, bg, bb}, {fr, fg, fb}) do
     "\e[48;2;#{br};#{bg};#{bb};38;2;#{fr};#{fg};#{fb}m"

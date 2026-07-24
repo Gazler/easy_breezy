@@ -42,6 +42,13 @@ defmodule EasyBreezy.PresenterView do
     started_at_ms =
       Keyword.get_lazy(opts, :started_at_ms, fn -> System.monotonic_time(:millisecond) end)
 
+    timer_paused? = Keyword.get(opts, :timer_paused?, false)
+
+    paused_elapsed_ms =
+      if timer_paused? do
+        Keyword.get_lazy(opts, :paused_elapsed_ms, fn -> ElapsedTime.elapsed_ms(started_at_ms) end)
+      end
+
     term =
       term
       |> maybe_enter_alt_screen(opts)
@@ -62,7 +69,9 @@ defmodule EasyBreezy.PresenterView do
         sync_status: "connecting",
         themes: Keyword.get(opts, :themes, @themes),
         started_at_ms: started_at_ms,
-        elapsed_label: ElapsedTime.label(started_at_ms),
+        timer_paused?: timer_paused?,
+        paused_elapsed_ms: paused_elapsed_ms,
+        elapsed_label: timer_label(started_at_ms, timer_paused?, paused_elapsed_ms),
         reset_timer_modal?: false,
         source_editor: nil,
         source_mode?: false,
@@ -146,6 +155,7 @@ defmodule EasyBreezy.PresenterView do
       |> assign(next_label_style: next_label_style)
       |> assign(current_source?: assigns.source_mode?)
       |> assign(current_editing?: !is_nil(assigns.source_editor))
+      |> assign(timer_action: if(assigns.timer_paused?, do: "resume", else: "pause"))
       |> assign(current_live_slide?: current_live_slide?)
       |> assign(current_live_snapshot?: current_live_snapshot?)
       |> assign(current_live_placeholder?: current_live_placeholder?)
@@ -155,12 +165,14 @@ defmodule EasyBreezy.PresenterView do
         render_context: %{
           theme_colors: assigns.theme_colors,
           code_theme: assigns.code_theme,
+          background: :surface,
           animate_title_gradient?: false,
           image_scope: "presenter-current"
         },
         next_render_context: %{
           theme_colors: assigns.theme_colors,
           code_theme: assigns.code_theme,
+          background: :panel,
           animate_title_gradient?: false,
           image_scope: "presenter-next"
         }
@@ -257,7 +269,7 @@ defmodule EasyBreezy.PresenterView do
             Slide {@visible_slide_index + 1}/{@total_slides} · Step {@visible_step + 1}/{@slide.steps + 1}
           </box>
           <box style={@footer_middle_style} class="text-muted">
-            presentation {@presentation_screen_width}x{@presentation_screen_height}
+            p {@timer_action} · presentation {@presentation_screen_width}x{@presentation_screen_height}
           </box>
           <box class="text-right bg-panel text" style={@footer_clock_style}>{@elapsed_label}</box>
         </box>
@@ -311,6 +323,10 @@ defmodule EasyBreezy.PresenterView do
 
   def handle_event(_, %{"key" => "e"}, %{assigns: %{source_mode?: true}} = term) do
     {:noreply, send_command(term, :edit_source)}
+  end
+
+  def handle_event(_, %{"key" => "p"}, term) do
+    {:noreply, term |> toggle_timer_pause() |> send_command(:toggle_timer_pause)}
   end
 
   def handle_event(_, %{"key" => key}, term) when key in @live_slide_movement_keys do
@@ -409,7 +425,7 @@ defmodule EasyBreezy.PresenterView do
 
   def handle_info(:clock_tick, term) do
     Process.send_after(self(), :clock_tick, @clock_tick_ms)
-    {:noreply, assign(term, elapsed_label: ElapsedTime.label(term.assigns.started_at_ms))}
+    {:noreply, refresh_timer_label(term)}
   end
 
   def handle_info({:easy_breezy_presentation_state, payload}, term) when is_map(payload) do
@@ -422,7 +438,9 @@ defmodule EasyBreezy.PresenterView do
       source_saved?(term.assigns.deck, term.assigns.source_editor, deck, source_editor)
 
     live_snapshot = next_live_snapshot(term.assigns.live_snapshot, payload, deck, slide_index)
-    started_at_ms = presentation_started_at_ms(payload, term.assigns.started_at_ms)
+
+    {started_at_ms, timer_paused?, paused_elapsed_ms} =
+      presentation_timer(payload, term.assigns.started_at_ms)
 
     previous_term = term
 
@@ -435,7 +453,9 @@ defmodule EasyBreezy.PresenterView do
         presentation_screen_width: Map.get(payload, :screen_width),
         presentation_screen_height: Map.get(payload, :screen_height),
         started_at_ms: started_at_ms,
-        elapsed_label: ElapsedTime.label(started_at_ms),
+        timer_paused?: timer_paused?,
+        paused_elapsed_ms: paused_elapsed_ms,
+        elapsed_label: timer_label(started_at_ms, timer_paused?, paused_elapsed_ms),
         source_editor: source_editor,
         source_mode?: Map.get(payload, :source_mode?, term.assigns.source_mode?),
         theme_name: theme_name,
@@ -498,15 +518,62 @@ defmodule EasyBreezy.PresenterView do
 
   defp reset_timer(term) do
     started_at_ms = System.monotonic_time(:millisecond)
+    paused_elapsed_ms = if term.assigns.timer_paused?, do: 0, else: nil
 
     term
     |> assign(
       reset_timer_modal?: false,
       started_at_ms: started_at_ms,
-      elapsed_label: ElapsedTime.label(started_at_ms)
+      paused_elapsed_ms: paused_elapsed_ms,
+      elapsed_label: timer_label(started_at_ms, term.assigns.timer_paused?, paused_elapsed_ms)
     )
     |> send_command(:reset_timer)
   end
+
+  defp toggle_timer_pause(%{assigns: %{timer_paused?: true}} = term) do
+    elapsed_ms = timer_elapsed_ms(term.assigns)
+
+    term
+    |> assign(
+      started_at_ms: ElapsedTime.started_at_ms_from_elapsed(elapsed_ms),
+      timer_paused?: false,
+      paused_elapsed_ms: nil
+    )
+    |> refresh_timer_label()
+  end
+
+  defp toggle_timer_pause(term) do
+    term
+    |> assign(
+      timer_paused?: true,
+      paused_elapsed_ms: ElapsedTime.elapsed_ms(term.assigns.started_at_ms)
+    )
+    |> refresh_timer_label()
+  end
+
+  defp refresh_timer_label(term) do
+    assign(
+      term,
+      elapsed_label:
+        timer_label(
+          term.assigns.started_at_ms,
+          term.assigns.timer_paused?,
+          term.assigns.paused_elapsed_ms
+        )
+    )
+  end
+
+  defp timer_label(_started_at_ms, true, elapsed_ms) when is_integer(elapsed_ms),
+    do: ElapsedTime.label_from_elapsed(elapsed_ms, "Paused")
+
+  defp timer_label(started_at_ms, _timer_paused?, _paused_elapsed_ms),
+    do: ElapsedTime.label(started_at_ms)
+
+  defp timer_elapsed_ms(%{timer_paused?: true, paused_elapsed_ms: elapsed_ms})
+       when is_integer(elapsed_ms),
+       do: max(elapsed_ms, 0)
+
+  defp timer_elapsed_ms(assigns), do: ElapsedTime.elapsed_ms(assigns.started_at_ms)
 
   defp forward_input(term, event) do
     send_command(
@@ -683,13 +750,27 @@ defmodule EasyBreezy.PresenterView do
 
   defp normalize_notes(note), do: [to_string(note)]
 
-  defp presentation_started_at_ms(payload, fallback) do
+  defp presentation_timer(payload, fallback_started_at_ms) do
+    timer_paused? = Map.get(payload, :timer_paused?, false)
+
     case Map.get(payload, :elapsed_ms) do
       elapsed_ms when is_integer(elapsed_ms) ->
-        ElapsedTime.started_at_ms_from_elapsed(elapsed_ms)
+        elapsed_ms = max(elapsed_ms, 0)
+
+        {
+          ElapsedTime.started_at_ms_from_elapsed(elapsed_ms),
+          timer_paused?,
+          if(timer_paused?, do: elapsed_ms, else: nil)
+        }
 
       _elapsed_ms ->
-        Map.get(payload, :started_at_ms, fallback)
+        started_at_ms = Map.get(payload, :started_at_ms, fallback_started_at_ms)
+
+        {
+          started_at_ms,
+          timer_paused?,
+          if(timer_paused?, do: ElapsedTime.elapsed_ms(started_at_ms), else: nil)
+        }
     end
   end
 

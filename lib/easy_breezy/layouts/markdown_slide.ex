@@ -8,6 +8,7 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
   alias EasyBreezy.Markdown, as: MarkdownRenderer
 
   import Breeze.Blocks
+  import EasyBreezy.Layouts.Helpers, only: [markdown_reset: 1]
   import EasyBreezy.Typography
 
   @breeze_components :text
@@ -155,37 +156,10 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
 
   defp markdown_render_opts(render_context) do
     [
-      reset: markdown_restore(render_context),
+      reset: markdown_reset(render_context),
       theme_colors: Map.get(render_context, :theme_colors, %{}),
       code_theme: Map.get(render_context, :code_theme, "github_dark"),
       code_background: :panel
     ]
   end
-
-  defp markdown_restore(%{theme_colors: %{surface: {br, bg, bb}, text: {tr, tg, tb}}}) do
-    "\e[48;2;#{br};#{bg};#{bb};38;2;#{tr};#{tg};#{tb}m"
-  end
-
-  defp markdown_restore(%{theme_colors: %{surface: background, text: foreground}})
-       when is_integer(background) and is_integer(foreground) do
-    "\e[#{ansi_background(background)};#{ansi_foreground(foreground)}m"
-  end
-
-  defp markdown_restore(%{theme_colors: %{text: {tr, tg, tb}}}) do
-    "\e[38;2;#{tr};#{tg};#{tb}m"
-  end
-
-  defp markdown_restore(%{theme_colors: %{text: foreground}}) when is_integer(foreground) do
-    "\e[#{ansi_foreground(foreground)}m"
-  end
-
-  defp markdown_restore(_render_context), do: IO.ANSI.reset()
-
-  defp ansi_foreground(color) when color in 0..7, do: 30 + color
-  defp ansi_foreground(color) when color in 8..15, do: 90 + color - 8
-  defp ansi_foreground(color), do: "38;5;#{color}"
-
-  defp ansi_background(color) when color in 0..7, do: 40 + color
-  defp ansi_background(color) when color in 8..15, do: 100 + color - 8
-  defp ansi_background(color), do: "48;5;#{color}"
 end
