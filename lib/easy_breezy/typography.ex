@@ -27,7 +27,6 @@ defmodule EasyBreezy.Typography do
   attr :shimmer_highlight, :any, default: nil
   attr :animation_frozen_now, :any, default: nil
   attr :id, :string, default: nil
-  attr :implicit, :any, default: nil
   attr :rest, :global
   slot(:inner_block, required: true)
 
@@ -49,16 +48,32 @@ defmodule EasyBreezy.Typography do
       assigns
       |> assign(class: class)
       |> assign(content: maybe_apply_shimmer(source, shimmer, theme_colors, background, 0.0))
-      |> assign(implicit: maybe_shimmer_implicit(assigns[:implicit], shimmer))
+      |> assign(shimmer: shimmer)
       |> assign(shimmer_source: source)
       |> assign(shimmer_base: shimmer && shimmer.base)
       |> assign(shimmer_highlight: shimmer && shimmer.highlight)
 
     ~H"""
     <box
+      :if={@shimmer}
       class={@class}
       id={@id}
-      implicit={@implicit}
+      implicit={EasyBreezy.Implicit.TextShimmer}
+      style={Breeze.Blocks.inline_style(assigns)}
+      shimmer_theme_colors={@theme_colors}
+      shimmer_background={@background}
+      shimmer_source={@shimmer_source}
+      shimmer_base={@shimmer_base}
+      shimmer_highlight={@shimmer_highlight}
+      animation_frozen_now={@animation_frozen_now}
+      {@rest}
+    >
+      {@content}
+    </box>
+    <box
+      :if={!@shimmer}
+      class={@class}
+      id={@id}
       style={Breeze.Blocks.inline_style(assigns)}
       shimmer_theme_colors={@theme_colors}
       shimmer_background={@background}
@@ -83,7 +98,7 @@ defmodule EasyBreezy.Typography do
   attr :shimmer_base, :any, default: nil
   attr :shimmer_highlight, :any, default: nil
   attr :id, :string, default: nil
-  attr :implicit, :any, default: nil
+  attr :animate_gradient, :boolean, default: false
   attr :font, :any, default: nil
   attr :letter_spacing, :integer, default: 0
   attr :rest, :global
@@ -103,7 +118,7 @@ defmodule EasyBreezy.Typography do
   attr :shimmer_base, :any, default: nil
   attr :shimmer_highlight, :any, default: nil
   attr :id, :string, default: nil
-  attr :implicit, :any, default: nil
+  attr :animate_gradient, :boolean, default: false
   attr :font, :any, default: nil
   attr :letter_spacing, :integer, default: 0
   attr :rest, :global
@@ -123,7 +138,7 @@ defmodule EasyBreezy.Typography do
   attr :shimmer_base, :any, default: nil
   attr :shimmer_highlight, :any, default: nil
   attr :id, :string, default: nil
-  attr :implicit, :any, default: nil
+  attr :animate_gradient, :boolean, default: false
   attr :font, :any, default: nil
   attr :letter_spacing, :integer, default: 0
   attr :rest, :global
@@ -170,7 +185,7 @@ defmodule EasyBreezy.Typography do
       |> assign(
         content: maybe_apply_text_effect(source, gradient, shimmer, theme_colors, background)
       )
-      |> assign(implicit: maybe_shimmer_implicit(assigns[:implicit], shimmer))
+      |> assign(shimmer: shimmer)
       |> assign(gradient_direction: gradient_direction)
       |> assign(gradient_source: source)
       |> assign(shimmer_source: source)
@@ -179,9 +194,49 @@ defmodule EasyBreezy.Typography do
 
     ~H"""
     <box
+      :if={@animate_gradient}
       class={@class}
       id={@id}
-      implicit={@implicit}
+      implicit={EasyBreezy.Implicit.TitleGradient}
+      style={Breeze.Blocks.inline_style(assigns)}
+      gradient_direction={@gradient_direction}
+      gradient_theme_colors={@theme_colors}
+      gradient_background={@background}
+      gradient_source={@gradient_source}
+      animation_frozen_now={@animation_frozen_now}
+      shimmer_theme_colors={@theme_colors}
+      shimmer_background={@background}
+      shimmer_source={@shimmer_source}
+      shimmer_base={@shimmer_base}
+      shimmer_highlight={@shimmer_highlight}
+      {@rest}
+    >
+      {@content}
+    </box>
+    <box
+      :if={!@animate_gradient && @shimmer}
+      class={@class}
+      id={@id}
+      implicit={EasyBreezy.Implicit.TextShimmer}
+      style={Breeze.Blocks.inline_style(assigns)}
+      gradient_direction={@gradient_direction}
+      gradient_theme_colors={@theme_colors}
+      gradient_background={@background}
+      gradient_source={@gradient_source}
+      animation_frozen_now={@animation_frozen_now}
+      shimmer_theme_colors={@theme_colors}
+      shimmer_background={@background}
+      shimmer_source={@shimmer_source}
+      shimmer_base={@shimmer_base}
+      shimmer_highlight={@shimmer_highlight}
+      {@rest}
+    >
+      {@content}
+    </box>
+    <box
+      :if={!@animate_gradient && !@shimmer}
+      class={@class}
+      id={@id}
       style={Breeze.Blocks.inline_style(assigns)}
       gradient_direction={@gradient_direction}
       gradient_theme_colors={@theme_colors}
@@ -326,11 +381,6 @@ defmodule EasyBreezy.Typography do
       _ -> text
     end
   end
-
-  defp maybe_shimmer_implicit(nil, shimmer) when not is_nil(shimmer),
-    do: EasyBreezy.Implicit.TextShimmer
-
-  defp maybe_shimmer_implicit(implicit, _shimmer), do: implicit
 
   defp resolve_text_color(name, theme_colors) when is_binary(name) do
     case name do

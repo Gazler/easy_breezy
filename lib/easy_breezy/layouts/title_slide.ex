@@ -32,10 +32,6 @@ defmodule EasyBreezy.Layouts.TitleSlide do
       |> assign(animation_frozen_now: animation_frozen_now)
       |> assign(title_region_style: title_region_style(assigns))
       |> assign(
-        title_gradient_implicit:
-          if(animate_title_gradient?, do: EasyBreezy.Implicit.TitleGradient, else: nil)
-      )
-      |> assign(
         title_gradient_id:
           "title-gradient-" <>
             Integer.to_string(:erlang.phash2(assigns.slide_id || assigns.title))
@@ -55,7 +51,7 @@ defmodule EasyBreezy.Layouts.TitleSlide do
         </box>
         <.h1
           id={@title_gradient_id}
-          implicit={@title_gradient_implicit}
+          animate_gradient={@animate_title_gradient?}
           class="text-gradient-to-b from-primary to-secondary"
           theme_colors={@theme_colors}
           background={Map.get(@theme_colors, :surface)}
