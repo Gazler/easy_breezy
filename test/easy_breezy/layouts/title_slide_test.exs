@@ -117,11 +117,11 @@ defmodule EasyBreezy.Layouts.TitleSlideTest do
     assert {:noreply, _focused, _consumed?} =
              Breeze.Test.input(session, %{
                "mouse" => %{
-                 x: target.left + 1,
-                 y: target.top + 1,
-                 action: :press,
-                 modifiers: [],
-                 button: :left
+                 "x" => target.left + 1,
+                 "y" => target.top + 1,
+                 "action" => "press",
+                 "modifiers" => [],
+                 "button" => "left"
                }
              })
 
