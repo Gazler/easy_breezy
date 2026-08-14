@@ -610,6 +610,27 @@ defmodule EasyBreezy.DeckMarkdownTest do
              """)
   end
 
+  test "parses literal start options for breeze slides" do
+    assert %Deck{
+             slides: [
+               %Slide{
+                 layout: :breeze,
+                 payload: %{
+                   start_opts: [directory: "../breeze_stories/storybook"]
+                 }
+               }
+             ]
+           } =
+             Markdown.parse!("""
+             ---
+             layout: breeze
+             title: Storybook
+             view: EasyBreezy.DeckMarkdownTest.CounterView
+             start_opts: [directory: "../breeze_stories/storybook"]
+             ---
+             """)
+  end
+
   test "allows punctuation in values and hyphenated keys" do
     assert %Deck{
              slides: [

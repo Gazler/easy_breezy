@@ -194,6 +194,8 @@ defmodule EasyBreezy.Deck.Markdown do
 
   defp normalize_key(key), do: String.replace(key, "-", "_")
 
+  defp parse_value(:start_opts, value), do: parse_start_opts(value)
+
   defp parse_value(key, value) do
     value = String.trim(value)
 
@@ -212,6 +214,19 @@ defmodule EasyBreezy.Deck.Markdown do
   end
 
   defp parse_value(value), do: parse_value(nil, value)
+
+  defp parse_start_opts(value) do
+    with {:ok, quoted} <- Code.string_to_quoted(value),
+         true <- Macro.quoted_literal?(quoted),
+         {opts, []} <- Code.eval_quoted(quoted),
+         true <- Keyword.keyword?(opts) do
+      opts
+    else
+      _other ->
+        raise ArgumentError,
+              "start_opts must be a literal keyword list, got: #{inspect(value)}"
+    end
+  end
 
   defp integer?(value), do: String.match?(value, ~r/^-?\d+$/)
   defp quoted?(value), do: String.match?(value, ~r/^(['"]).*\1$/)
