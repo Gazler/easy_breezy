@@ -45,13 +45,13 @@ defmodule EasyBreezy.Layouts.PresenterSlide do
       <box>
       </box>
       <box style={@panel_style} class="grid grid-cols-2 width-full">
-        <box style={@panel_style} class="border-rounded border border-stroke bg-panel">
+        <box style={@panel_style} class="border border-stroke bg-panel">
           <box class="bold text-secondary"> Audience sees </box>
           <box>
           </box>
           <box :for={line <- @item_lines} class="width-full">{line}</box>
         </box>
-        <box style={@panel_style} class="border-rounded border border-stroke bg-panel">
+        <box style={@panel_style} class="border border-stroke bg-panel">
           <box class="bold text-secondary"> Presenter notes </box>
           <box>
           </box>

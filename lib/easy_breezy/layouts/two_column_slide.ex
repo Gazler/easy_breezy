@@ -112,12 +112,12 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
         left_panel_class:
           if(image_mode?,
             do: "",
-            else: "border-rounded border border-stroke bg-panel"
+            else: "border border-stroke bg-panel"
           ),
         right_panel_class:
           if(image_mode?,
             do: "",
-            else: "border-rounded border border-stroke bg-panel"
+            else: "border border-stroke bg-panel"
           )
       )
 
@@ -150,7 +150,7 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
             image-active={@image_active?}
             image-scope={"#{@image_scope}:left"}
             style={@left_image_style}
-            class="width-full border-rounded border border-stroke bg-panel"
+            class="width-full border border-stroke bg-panel"
           >
           </box>
         </box>
@@ -182,7 +182,7 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
             image-active={@image_active?}
             image-scope={"#{@image_scope}:right"}
             style={@right_image_style}
-            class="width-full border-rounded border border-stroke bg-panel"
+            class="width-full border border-stroke bg-panel"
           >
           </box>
         </box>

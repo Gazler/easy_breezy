@@ -152,7 +152,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
     <box class="width-full height-full">
       <box class="bold text-primary" style={@primary_style}>{@title}</box>
       <box :if={@path} class="text-muted" style={@muted_style}>{@path}</box>
-      <box class="height-full border-rounded border border-stroke bg-panel" style={@panel_style}>
+      <box class="height-full border border-stroke bg-panel" style={@panel_style}>
         <box class="absolute top-0" style={Map.merge(@border_style, %{left: @gutter_left})}>┬</box>
         <box class="absolute" style={Map.merge(@border_style, %{left: @gutter_left, bottom: -2})}>
           ┴
