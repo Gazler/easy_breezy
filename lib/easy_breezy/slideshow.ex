@@ -456,10 +456,29 @@ defmodule EasyBreezy.Slideshow do
   end
 
   def handle_info(
+        {:transition_tick, id, tick_at_ms},
+        %{assigns: %{transition: %{id: id} = transition}} = term
+      )
+      when is_integer(tick_at_ms) do
+    advance_transition(term, transition, tick_at_ms)
+  end
+
+  def handle_info(
         {:transition_tick, id},
         %{assigns: %{transition: %{id: id} = transition}} = term
       ) do
-    frame = transition.frame + 1
+    advance_transition(term, transition, System.monotonic_time(:millisecond))
+  end
+
+  def handle_info({:transition_tick, _stale_id, _tick_at_ms}, term),
+    do: {:noreply, term, invalidate: false}
+
+  def handle_info({:transition_tick, _stale_id}, term), do: {:noreply, term, invalidate: false}
+
+  def handle_info(_, term), do: {:noreply, term}
+
+  defp advance_transition(term, transition, now_ms) do
+    frame = next_frame(transition, now_ms)
 
     if frame >= transition.frames do
       {:noreply,
@@ -472,14 +491,18 @@ defmodule EasyBreezy.Slideshow do
        |> focus_visible_live_slide()
        |> maybe_publish_presentation_soon()}
     else
-      timer_ref = Process.send_after(self(), {:transition_tick, id}, transition.interval_ms)
-      {:noreply, assign(term, transition: %{transition | frame: frame, timer_ref: timer_ref})}
+      transition = %{transition | frame: frame}
+
+      timer_ref =
+        Process.send_after(
+          self(),
+          {:transition_tick, transition.id},
+          next_tick_delay_ms(transition, now_ms)
+        )
+
+      {:noreply, assign(term, transition: %{transition | timer_ref: timer_ref})}
     end
   end
-
-  def handle_info({:transition_tick, _stale_id}, term), do: {:noreply, term, invalidate: false}
-
-  def handle_info(_, term), do: {:noreply, term}
 
   defp footer_visible?(%{presenter?: true}), do: true
   defp footer_visible?(%{keybindings_bar?: keybindings_bar?}), do: keybindings_bar?

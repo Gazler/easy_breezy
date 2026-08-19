@@ -172,6 +172,32 @@ defmodule EasyBreezy.SlideshowTransitionTest do
     assert is_nil(Breeze.Test.metadata(session).assigns.transition)
   end
 
+  test "finishes an overdue transition instead of stretching its duration" do
+    session =
+      Breeze.Test.start!(EasyBreezy.Slideshow,
+        size: {80, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: transition_deck(), themes: [:nebula], theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    _initial_render = Breeze.Test.render!(session)
+
+    assert {:noreply, _focused, true} =
+             Breeze.Test.event(session, nil, %{"key" => "ArrowRight"})
+
+    transition = Breeze.Test.metadata(session).assigns.transition
+    Process.cancel_timer(transition.timer_ref)
+
+    deadline_ms = transition.started_at_ms + transition.frames * transition.interval_ms
+    send(session.pid, {:transition_tick, transition.id, deadline_ms})
+
+    metadata = Breeze.Test.metadata(session)
+    assert is_nil(metadata.assigns.transition)
+    assert metadata.assigns.slide_index == 1
+  end
+
   defp title_gradient(implicit_state) do
     Enum.find(implicit_state, fn
       {"title-gradient-" <> _, {EasyBreezy.Implicit.TitleGradient, _state}} -> true
@@ -188,8 +214,21 @@ defmodule EasyBreezy.SlideshowTransitionTest do
 
   defp tick_transition(session) do
     case Breeze.Test.metadata(session).assigns.transition do
-      %{id: id} -> send(session.pid, {:transition_tick, id})
-      nil -> :ok
+      %{id: id, timer_ref: timer_ref} = transition ->
+        Process.cancel_timer(timer_ref)
+
+        send(
+          session.pid,
+          {:transition_tick, id, EasyBreezy.Transitions.next_tick_at_ms(transition)}
+        )
+
+        case Breeze.Test.metadata(session).assigns.transition do
+          %{timer_ref: next_timer_ref} -> Process.cancel_timer(next_timer_ref)
+          nil -> :ok
+        end
+
+      nil ->
+        :ok
     end
   end
 

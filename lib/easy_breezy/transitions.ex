@@ -93,28 +93,36 @@ defmodule EasyBreezy.Transitions do
     distance = transition_distance(direction, body_width, body_height)
     frames = transition_frame_count(direction, distance)
     interval_ms = transition_interval_ms(direction, distance, frames)
-    frozen_now = System.monotonic_time(:millisecond)
     code_slide_snapshots = code_slide_snapshots(term, to_index, to_step, body_width, body_height)
+    started_at_ms = System.monotonic_time(:millisecond)
 
     id = make_ref()
-    timer_ref = Process.send_after(self(), {:transition_tick, id}, interval_ms)
+
+    transition = %{
+      id: id,
+      from_index: term.assigns.slide_index,
+      from_step: term.assigns.step,
+      to_index: to_index,
+      to_step: to_step,
+      direction: direction,
+      distance: distance,
+      frame: 0,
+      frames: frames,
+      interval_ms: interval_ms,
+      started_at_ms: started_at_ms,
+      animation_frozen_now: started_at_ms,
+      code_slide_snapshots: code_slide_snapshots
+    }
+
+    timer_ref =
+      Process.send_after(
+        self(),
+        {:transition_tick, id},
+        next_tick_delay_ms(transition, System.monotonic_time(:millisecond))
+      )
 
     Breeze.View.assign(term,
-      transition: %{
-        id: id,
-        timer_ref: timer_ref,
-        from_index: term.assigns.slide_index,
-        from_step: term.assigns.step,
-        to_index: to_index,
-        to_step: to_step,
-        direction: direction,
-        distance: distance,
-        frame: 0,
-        frames: frames,
-        interval_ms: interval_ms,
-        animation_frozen_now: frozen_now,
-        code_slide_snapshots: code_slide_snapshots
-      }
+      transition: Map.put(transition, :timer_ref, timer_ref)
     )
   end
 
@@ -143,6 +151,36 @@ defmodule EasyBreezy.Transitions do
       when is_integer(distance) and is_integer(frames) and frames > 0 do
     duration_ms = scaled_transition_duration_ms(direction, distance)
     max(div(duration_ms, frames), 1)
+  end
+
+  def next_frame(
+        %{
+          frame: frame,
+          frames: frames,
+          interval_ms: interval_ms,
+          started_at_ms: started_at_ms
+        },
+        now_ms
+      )
+      when is_integer(now_ms) do
+    elapsed_frame = div(max(now_ms - started_at_ms, 0), interval_ms)
+
+    frame
+    |> Kernel.+(1)
+    |> max(elapsed_frame)
+    |> min(frames)
+  end
+
+  def next_tick_delay_ms(transition, now_ms) when is_integer(now_ms) do
+    max(next_tick_at_ms(transition) - now_ms, 0)
+  end
+
+  def next_tick_at_ms(%{
+        frame: frame,
+        interval_ms: interval_ms,
+        started_at_ms: started_at_ms
+      }) do
+    started_at_ms + (frame + 1) * interval_ms
   end
 
   defp transition_frame_count(_direction, distance), do: transition_frames(distance)
