@@ -278,6 +278,45 @@ defmodule EasyBreezy.Layouts.MarkdownSlideTest do
     assert_blank_line_between(rendered, "IO.puts(:ok)", "Hello World")
   end
 
+  test "compact markdown slides keep revealed breeze fences fully visible" do
+    deck =
+      Markdown.parse!("""
+      ---
+      layout: markdown
+      title: BackBreeze Example
+      ---
+
+      ```elixir
+      BackBreeze.Box.new(
+        style: %{border: :rounded, padding: 1},
+        children: [
+          BackBreeze.Box.new(content: "Hello"),
+          BackBreeze.Box.new(
+            content: "I am red",
+            style: %{foreground_color: 1}
+          )
+        ]
+      )
+      |> BackBreeze.Box.render()
+      ```
+
+      <!-- step -->
+
+      ```breeze
+      <box class="border-rounded padding-1 width-12">
+        <box>Hello</box>
+        <box class="text-1">I am red</box>
+      </box>
+      ```
+      """)
+
+    rendered = render_plain!(deck, step: 1, size: {80, 22})
+
+    assert rendered =~ "|> BackBreeze.Box.render()"
+    assert rendered =~ "╭──────────╮"
+    assert rendered =~ "╰──────────╯"
+  end
+
   test "markdown step markers reveal later fences on later steps" do
     deck =
       Markdown.parse!("""
@@ -332,7 +371,7 @@ defmodule EasyBreezy.Layouts.MarkdownSlideTest do
   defp render_plain!(deck, opts) do
     session =
       Breeze.Test.start!(EasyBreezy.Slideshow,
-        size: {84, 24},
+        size: Keyword.get(opts, :size, {84, 24}),
         theme: Breeze.Theme.builtin(:nebula),
         start_opts: [
           deck: deck,

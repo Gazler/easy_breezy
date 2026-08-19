@@ -16,6 +16,8 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
   @breeze_components :h2
   @breeze_components :h3
 
+  @compact_markdown_height 17
+
   attr :slide_id, :any, required: true
   attr :title, :string, default: nil
   attr :content, :string, required: true
@@ -101,7 +103,7 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
         %{
           type: :markdown,
           rendered: MarkdownRenderer.render(content, markdown_width, render_opts),
-          blank_after?: blank_after_markdown?(content, next_block)
+          blank_after?: blank_after_markdown?(content, next_block, markdown_height)
         }
 
       {%{type: :mermaid, content: source}, _next_block} ->
@@ -126,10 +128,11 @@ defmodule EasyBreezy.Layouts.MarkdownSlide do
   defp with_next_block([]), do: []
   defp with_next_block([_ | rest] = blocks), do: Enum.zip(blocks, rest ++ [nil])
 
-  defp blank_after_markdown?(_content, nil), do: false
+  defp blank_after_markdown?(_content, nil, _markdown_height), do: false
 
-  defp blank_after_markdown?(content, next_block) do
-    MarkdownRenderer.ends_with_code_fence?(content) or starts_with_code_fence?(next_block)
+  defp blank_after_markdown?(content, next_block, markdown_height) do
+    markdown_height > @compact_markdown_height and
+      (MarkdownRenderer.ends_with_code_fence?(content) or starts_with_code_fence?(next_block))
   end
 
   defp starts_with_code_fence?(%{type: :markdown, content: content}) do
