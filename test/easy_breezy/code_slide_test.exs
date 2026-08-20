@@ -1,7 +1,68 @@
 defmodule EasyBreezy.CodeSlideTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  alias EasyBreezy.{Deck, Slide}
   alias EasyBreezy.Layouts.CodeSlide
+
+  test "renders an optional icon in the code slide header by default" do
+    deck = %Deck{
+      title: "Icon Deck",
+      slides: [
+        %Slide{
+          id: :code,
+          title: "Code",
+          layout: :code,
+          payload: %{
+            title: "Counter Example",
+            code_icon: "",
+            code_icon_color: "#9A67AE",
+            code_language: "elixir",
+            code_source: "IO.puts(:ok)",
+            code_path: "counter.ex",
+            code_focus_ranges: []
+          }
+        }
+      ]
+    }
+
+    session =
+      Breeze.Test.start!(EasyBreezy.Slideshow,
+        size: {80, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, themes: [:nebula], theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    raw_rendered = Breeze.Test.render!(session)
+    rendered = BackBreeze.Utils.strip_escape_chars(raw_rendered)
+
+    assert rendered =~ "Counter Example"
+    assert rendered =~ " counter.ex"
+    assert raw_rendered =~ "38;2;154;103;174m "
+
+    focused_slide =
+      deck.slides
+      |> List.first()
+      |> Map.update!(:payload, &Map.put(&1, :code_focus_ranges, [1]))
+
+    focused_session =
+      Breeze.Test.start!(EasyBreezy.Slideshow,
+        size: {80, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [
+          deck: %{deck | slides: [focused_slide]},
+          themes: [:nebula],
+          theme: :nebula
+        ]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(focused_session) end)
+
+    assert focused_session
+           |> Breeze.Test.render!()
+           |> String.contains?("38;2;76;65;109m ")
+  end
 
   test "centers focused code in the visible code viewport" do
     source = Enum.map_join(1..50, "\n", &"line #{&1}")

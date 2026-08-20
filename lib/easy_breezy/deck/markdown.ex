@@ -409,6 +409,8 @@ defmodule EasyBreezy.Deck.Markdown do
 
     payload = %{
       title: Map.get(meta, :title),
+      code_icon: Map.get(meta, :icon) || Map.get(meta, :code_icon),
+      code_icon_color: Map.get(meta, :icon_color) || Map.get(meta, :code_icon_color),
       code_language: Map.get(meta, :language) || Map.get(meta, :code_language) || "text",
       code_source: source,
       code_path: path,

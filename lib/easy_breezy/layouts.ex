@@ -14,10 +14,10 @@ defmodule EasyBreezy.Layouts do
 
   alias EasyBreezy.Layouts.CodeSlide
 
-  attr :slide, :any, required: true
-  attr :body_width, :integer, required: true
-  attr :body_height, :integer, required: true
-  attr :render_context, :map, default: %{}
+  attr(:slide, :any, required: true)
+  attr(:body_width, :integer, required: true)
+  attr(:body_height, :integer, required: true)
+  attr(:render_context, :map, default: %{})
 
   def slide_source(assigns) do
     source =
@@ -48,12 +48,12 @@ defmodule EasyBreezy.Layouts do
     """
   end
 
-  attr :slide, :any, required: true
-  attr :step, :integer, required: true
-  attr :body_width, :integer, required: true
-  attr :body_height, :integer, required: true
-  attr :live_state, :map, default: %{}
-  attr :render_context, :map, default: %{}
+  attr(:slide, :any, required: true)
+  attr(:step, :integer, required: true)
+  attr(:body_width, :integer, required: true)
+  attr(:body_height, :integer, required: true)
+  attr(:live_state, :map, default: %{})
+  attr(:render_context, :map, default: %{})
 
   def slide_body(%{slide: %{layout: :title}} = assigns) do
     assigns = assign_payload(assigns)
@@ -171,6 +171,8 @@ defmodule EasyBreezy.Layouts do
     ~H"""
     <.code_slide
       title={@payload.title}
+      icon={@payload[:code_icon]}
+      icon_color={@payload[:code_icon_color]}
       language={@payload[:code_language]}
       source={@payload[:code_source]}
       path={@payload[:code_path]}

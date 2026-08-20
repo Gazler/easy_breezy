@@ -73,12 +73,16 @@ defmodule EasyBreezy.DeckMarkdownTest do
              layout: code
              title: Snippet
              language: elixir
+             icon: 
+             icon_color: "#9A67AE"
              focus: [1..2, 4]
              ---
              IO.puts(:ok)
              """)
 
     assert %{
+             code_icon: "",
+             code_icon_color: "#9A67AE",
              code_language: "elixir",
              code_source: "IO.puts(:ok)",
              code_focus_ranges: []

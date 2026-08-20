@@ -108,6 +108,39 @@ defmodule EasyBreezy.Layouts.TwoColumnSlideTest do
     assert render_deck!(deck) =~ "Images"
   end
 
+  test "renders image-backed column titles in panel borders and preserves deck chrome" do
+    deck = %Deck{
+      title: "Image Deck",
+      slides: [
+        %Slide{
+          id: :image,
+          title: "Thanks For Listening",
+          layout: :two_column,
+          payload: %{
+            title: "Thanks For Listening",
+            left_title: "Gazler",
+            left_mode: :image,
+            left_path: "missing.png",
+            right_title: "Links",
+            right_mode: :text,
+            right_lines: ["defbreeze.com", "", "## Contact", "gary@c66.dev"]
+          }
+        }
+      ]
+    }
+
+    rendered = render_deck!(deck)
+    visible = BackBreeze.Utils.strip_escape_chars(rendered)
+
+    assert visible =~ "Image Deck"
+    assert visible =~ "╭─Gazler"
+    assert visible =~ "╭─Links"
+    assert visible =~ "defbreeze.com"
+    assert visible =~ "Contact"
+    assert visible =~ "gary@c66.dev"
+    refute visible =~ "## Contact"
+  end
+
   defp render_deck!(deck) do
     session =
       Breeze.Test.start!(EasyBreezy.Slideshow,

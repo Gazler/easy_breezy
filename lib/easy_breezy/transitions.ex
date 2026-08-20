@@ -16,12 +16,12 @@ defmodule EasyBreezy.Transitions do
   @transition_columns_per_frame 10
   @transition_min_frames 16
 
-  attr :transition, :map, required: true
-  attr :deck, :map, required: true
-  attr :body_width, :integer, required: true
-  attr :body_height, :integer, required: true
-  attr :live_state, :map, default: %{}
-  attr :render_context, :map, default: %{}
+  attr(:transition, :map, required: true)
+  attr(:deck, :map, required: true)
+  attr(:body_width, :integer, required: true)
+  attr(:body_height, :integer, required: true)
+  attr(:live_state, :map, default: %{})
+  attr(:render_context, :map, default: %{})
 
   def slide_transition(assigns) do
     from_slide = Enum.at(assigns.deck.slides, assigns.transition.from_index)
@@ -286,7 +286,12 @@ defmodule EasyBreezy.Transitions do
         |> Map.get(:code_focus_ranges, [])
         |> CodeSlide.focus_ranges_for_step(step)
 
-      viewport_height = CodeSlide.code_viewport_height(body_height, Map.get(payload, :code_path))
+      viewport_height =
+        CodeSlide.code_viewport_height(
+          body_height,
+          Map.get(payload, :code_path),
+          Map.get(payload, :code_icon)
+        )
 
       key =
         CodeSlide.render_snapshot_key(

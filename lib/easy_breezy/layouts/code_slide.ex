@@ -59,21 +59,23 @@ defmodule EasyBreezy.Layouts.CodeSlide do
     end
   end
 
-  attr :title, :string, required: true
-  attr :language, :string, default: "text"
-  attr :source, :string, required: true
-  attr :path, :string, default: nil
-  attr :focus_ranges, :list, default: []
-  attr :body_width, :integer, required: true
-  attr :body_height, :integer, required: true
-  attr :render_context, :map, default: %{}
+  attr(:title, :string, required: true)
+  attr(:icon, :string, default: nil)
+  attr(:icon_color, :any, default: nil)
+  attr(:language, :string, default: "text")
+  attr(:source, :string, required: true)
+  attr(:path, :string, default: nil)
+  attr(:focus_ranges, :list, default: [])
+  attr(:body_width, :integer, required: true)
+  attr(:body_height, :integer, required: true)
+  attr(:render_context, :map, default: %{})
 
   def code_slide(assigns) do
     fade = Map.get(assigns.render_context, :fade, 0)
     code_theme = Map.get(assigns.render_context, :code_theme, "github_dark")
     theme_colors = Map.get(assigns.render_context, :theme_colors, %{})
     transition? = Map.get(assigns.render_context, :transition?, false)
-    viewport_height = code_viewport_height(assigns.body_height, assigns.path)
+    viewport_height = code_viewport_height(assigns.body_height, assigns.path, assigns.icon)
 
     snapshot_key =
       render_snapshot_key(
@@ -118,6 +120,8 @@ defmodule EasyBreezy.Layouts.CodeSlide do
 
     assigns =
       assigns
+      |> assign(display_path: code_path(assigns.icon, assigns.path))
+      |> assign(icon_label: icon_label(assigns.icon))
       |> assign(fade: fade)
       |> assign(theme_colors: theme_colors)
       |> assign(transition?: transition?)
@@ -133,6 +137,7 @@ defmodule EasyBreezy.Layouts.CodeSlide do
       |> assign(chrome_fade: chrome_fade)
       |> assign(primary_style: fade_role_style(theme_colors, :primary, chrome_fade))
       |> assign(muted_style: fade_role_style(theme_colors, :muted, chrome_fade))
+      |> assign(icon_style: icon_style(assigns.icon_color, theme_colors, chrome_fade))
       |> assign(border_style: fade_role_style(theme_colors, :stroke, chrome_fade))
       |> assign(
         panel_style:
@@ -151,7 +156,10 @@ defmodule EasyBreezy.Layouts.CodeSlide do
     ~H"""
     <box class="width-full height-full">
       <box class="bold text-primary" style={@primary_style}>{@title}</box>
-      <box :if={@path} class="text-muted" style={@muted_style}>{@path}</box>
+      <box :if={@display_path} class="inline">
+        <box :if={@icon_label} style={@icon_style}>{@icon_label}</box>
+        <box :if={@path not in [nil, ""]} class="text-muted" style={@muted_style}>{@path}</box>
+      </box>
       <box class="height-full border border-stroke bg-panel" style={@panel_style}>
         <box class="absolute top-0" style={Map.merge(@border_style, %{left: @gutter_left})}>┬</box>
         <box class="absolute" style={Map.merge(@border_style, %{left: @gutter_left, bottom: -2})}>
@@ -187,6 +195,13 @@ defmodule EasyBreezy.Layouts.CodeSlide do
     </box>
     """
   end
+
+  defp code_path(icon, path) when icon in [nil, ""], do: path
+  defp code_path(icon, path) when path in [nil, ""], do: icon
+  defp code_path(icon, path), do: icon <> " " <> path
+
+  defp icon_label(icon) when icon in [nil, ""], do: nil
+  defp icon_label(icon), do: String.trim_trailing(icon) <> " "
 
   def render_snapshot_key(
         source,
@@ -269,9 +284,9 @@ defmodule EasyBreezy.Layouts.CodeSlide do
     }
   end
 
-  def code_viewport_height(body_height, path) do
+  def code_viewport_height(body_height, path, icon \\ nil) do
     title_height = 1
-    path_height = if path in [nil, ""], do: 0, else: 1
+    path_height = if path in [nil, ""] and icon in [nil, ""], do: 0, else: 1
     panel_border_height = 2
 
     body_height
@@ -441,6 +456,16 @@ defmodule EasyBreezy.Layouts.CodeSlide do
 
       _ ->
         fade_style(amount, %{})
+    end
+  end
+
+  defp icon_style(nil, theme_colors, amount),
+    do: fade_role_style(theme_colors, :muted, amount)
+
+  defp icon_style(color, theme_colors, amount) do
+    case Map.get(theme_colors, :bg) do
+      nil -> fade_style(amount, %{foreground_color: color})
+      background -> %{foreground_color: Theme.blend(color, background, amount / 100)}
     end
   end
 
