@@ -27,6 +27,7 @@ defmodule EasyBreezy.Typography do
   attr :shimmer_highlight, :any, default: nil
   attr :animation_frozen_now, :any, default: nil
   attr :id, :string, default: nil
+  attr :static_shimmer, :boolean, default: false
   attr :rest, :global
   slot(:inner_block, required: true)
 
@@ -55,7 +56,7 @@ defmodule EasyBreezy.Typography do
 
     ~H"""
     <box
-      :if={@shimmer}
+      :if={@shimmer && !@static_shimmer}
       class={@class}
       id={@id}
       implicit={EasyBreezy.Implicit.TextShimmer}
@@ -71,7 +72,7 @@ defmodule EasyBreezy.Typography do
       {@content}
     </box>
     <box
-      :if={!@shimmer}
+      :if={!@shimmer || @static_shimmer}
       class={@class}
       id={@id}
       style={Breeze.Blocks.inline_style(assigns)}
@@ -99,6 +100,7 @@ defmodule EasyBreezy.Typography do
   attr :shimmer_highlight, :any, default: nil
   attr :id, :string, default: nil
   attr :animate_gradient, :boolean, default: false
+  attr :static_shimmer, :boolean, default: false
   attr :font, :any, default: nil
   attr :letter_spacing, :integer, default: 0
   attr :rest, :global
@@ -119,6 +121,7 @@ defmodule EasyBreezy.Typography do
   attr :shimmer_highlight, :any, default: nil
   attr :id, :string, default: nil
   attr :animate_gradient, :boolean, default: false
+  attr :static_shimmer, :boolean, default: false
   attr :font, :any, default: nil
   attr :letter_spacing, :integer, default: 0
   attr :rest, :global
@@ -139,6 +142,7 @@ defmodule EasyBreezy.Typography do
   attr :shimmer_highlight, :any, default: nil
   attr :id, :string, default: nil
   attr :animate_gradient, :boolean, default: false
+  attr :static_shimmer, :boolean, default: false
   attr :font, :any, default: nil
   attr :letter_spacing, :integer, default: 0
   attr :rest, :global
@@ -214,7 +218,7 @@ defmodule EasyBreezy.Typography do
       {@content}
     </box>
     <box
-      :if={!@animate_gradient && @shimmer}
+      :if={!@animate_gradient && @shimmer && !@static_shimmer}
       class={@class}
       id={@id}
       implicit={EasyBreezy.Implicit.TextShimmer}
@@ -234,7 +238,7 @@ defmodule EasyBreezy.Typography do
       {@content}
     </box>
     <box
-      :if={!@animate_gradient && !@shimmer}
+      :if={!@animate_gradient && (!@shimmer || @static_shimmer)}
       class={@class}
       id={@id}
       style={Breeze.Blocks.inline_style(assigns)}

@@ -109,6 +109,7 @@ defmodule EasyBreezy.Slideshow do
           code_theme: assigns.code_theme,
           background: :surface,
           animate_title_gradient?: true,
+          animate_text_shimmer?: true,
           image_scope: "presentation"
         }
       )

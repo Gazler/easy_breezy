@@ -230,6 +230,7 @@ defmodule EasyBreezy.Transitions do
   defp transition_render_context(render_context, transition) when is_map(render_context) do
     render_context
     |> Map.put(:animate_title_gradient?, true)
+    |> Map.put(:animate_text_shimmer?, true)
     |> Map.put(:transition?, true)
     |> Map.put(:code_slide_snapshots, Map.get(transition, :code_slide_snapshots, %{}))
     |> Map.put(:animation_frozen_now, Map.get(transition, :animation_frozen_now))
@@ -238,6 +239,7 @@ defmodule EasyBreezy.Transitions do
   defp transition_render_context(_render_context, transition) do
     %{
       animate_title_gradient?: true,
+      animate_text_shimmer?: true,
       transition?: true,
       code_slide_snapshots: Map.get(transition, :code_slide_snapshots, %{}),
       animation_frozen_now: Map.get(transition, :animation_frozen_now)

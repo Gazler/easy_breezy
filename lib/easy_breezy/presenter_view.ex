@@ -7,6 +7,7 @@ defmodule EasyBreezy.PresenterView do
   alias EasyBreezy.ElapsedTime
   alias EasyBreezy.LiveSlide
   alias EasyBreezy.PresenterScroll
+  alias EasyBreezy.PresentationTiming
   alias EasyBreezy.SourceEditor
   alias EasyBreezy.Slideshow.KittyImage
   alias Breeze.Theme
@@ -38,6 +39,20 @@ defmodule EasyBreezy.PresenterView do
 
     {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
     {theme_name, theme} = resolve_theme(Keyword.get(opts, :theme, :nebula))
+
+    metadata_dir =
+      opts
+      |> Keyword.get_lazy(:metadata_dir, &PresentationTiming.metadata_dir/0)
+      |> Path.expand()
+
+    timing_run = Keyword.get(opts, :timing_run)
+
+    timing_runs =
+      metadata_dir
+      |> PresentationTiming.list_runs(deck)
+      |> previous_timing_runs(timing_run)
+
+    expected_run = initial_expected_run(opts, timing_runs, deck)
 
     started_at_ms =
       Keyword.get_lazy(opts, :started_at_ms, fn -> System.monotonic_time(:millisecond) end)
@@ -73,6 +88,12 @@ defmodule EasyBreezy.PresenterView do
         paused_elapsed_ms: paused_elapsed_ms,
         elapsed_label: timer_label(started_at_ms, timer_paused?, paused_elapsed_ms),
         reset_timer_modal?: false,
+        metadata_dir: metadata_dir,
+        timing_run: timing_run,
+        timing_runs: timing_runs,
+        timing_runs_modal?: false,
+        timing_run_index: 0,
+        expected_run: expected_run,
         source_editor: nil,
         source_mode?: false,
         theme_name: theme_name,
@@ -130,6 +151,26 @@ defmodule EasyBreezy.PresenterView do
     footer_left_width = min(34, max(div(assigns.screen_width, 3), 22))
     footer_middle_width = max(assigns.screen_width - footer_left_width - footer_clock_width, 1)
     notes = speaker_notes(slide, current_body_width, step)
+    timing_label = timing_label(assigns.timing_run, assigns.expected_run, slide_index, slide)
+
+    footer_status =
+      footer_status(
+        assigns.timer_paused?,
+        timing_label,
+        presentation_width,
+        presentation_height,
+        footer_middle_width
+      )
+
+    selected_timing_run = Enum.at(assigns.timing_runs, assigns.timing_run_index)
+
+    timing_run_items = timing_run_items(assigns.timing_runs, assigns.expected_run)
+
+    selected_timing_run_id =
+      case selected_timing_run do
+        %{id: id} -> id
+        _run -> nil
+      end
 
     assigns =
       assigns
@@ -155,7 +196,10 @@ defmodule EasyBreezy.PresenterView do
       |> assign(next_label_style: next_label_style)
       |> assign(current_source?: assigns.source_mode?)
       |> assign(current_editing?: !is_nil(assigns.source_editor))
-      |> assign(timer_action: if(assigns.timer_paused?, do: "resume", else: "pause"))
+      |> assign(footer_status: footer_status)
+      |> assign(timing_run_items: timing_run_items)
+      |> assign(selected_timing_run_id: selected_timing_run_id)
+      |> assign(selected_timing_run_summary: timing_run_summary(selected_timing_run))
       |> assign(current_live_slide?: current_live_slide?)
       |> assign(current_live_snapshot?: current_live_snapshot?)
       |> assign(current_live_placeholder?: current_live_placeholder?)
@@ -167,6 +211,7 @@ defmodule EasyBreezy.PresenterView do
           code_theme: assigns.code_theme,
           background: :surface,
           animate_title_gradient?: false,
+          animate_text_shimmer?: false,
           image_scope: "presenter-current"
         },
         next_render_context: %{
@@ -174,6 +219,7 @@ defmodule EasyBreezy.PresenterView do
           code_theme: assigns.code_theme,
           background: :panel,
           animate_title_gradient?: false,
+          animate_text_shimmer?: false,
           image_scope: "presenter-next"
         }
       )
@@ -268,9 +314,7 @@ defmodule EasyBreezy.PresenterView do
           <box style={@footer_left_style}>
             Slide {@visible_slide_index + 1}/{@total_slides} · Step {@visible_step + 1}/{@slide.steps + 1}
           </box>
-          <box style={@footer_middle_style} class="text-muted">
-            p {@timer_action} · presentation {@presentation_screen_width}x{@presentation_screen_height}
-          </box>
+          <box style={@footer_middle_style} class="text-muted">{@footer_status}</box>
           <box class="text-right bg-panel text" style={@footer_clock_style}>{@elapsed_label}</box>
         </box>
       </box>
@@ -284,7 +328,36 @@ defmodule EasyBreezy.PresenterView do
       >
         <:title>Reset Timer</:title>
         <box class="absolute left-2 top-2 text">Reset elapsed timer to 00:00?</box>
-        <box class="absolute left-2 top-4 text-muted">Enter/y reset · Esc/n cancel</box>
+        <box class="absolute left-2 top-3 text-muted">This starts a new timing run.</box>
+        <box class="absolute left-2 top-5 text-muted">Enter/y reset · Esc/n cancel</box>
+      </.modal>
+      <.modal
+        :if={@timing_runs_modal?}
+        id="timing-runs-modal"
+        width={74}
+        height={13}
+        dim
+        br-change="close_timing_runs"
+      >
+        <:title>Previous Timing Runs</:title>
+        <box :if={@timing_run_items == []} class="absolute left-2 top-2 text-muted">
+          No previous timing runs for this deck.
+        </box>
+        <.list
+          :if={@timing_run_items != []}
+          id="timing-runs-list"
+          variant="muted"
+          loop="false"
+          list-selected={@selected_timing_run_id}
+          br-change="timing_run_changed"
+          class="absolute left-2 top-2 width-68 height-5 border-0 focus:border-0"
+        >
+          <:item :for={item <- @timing_run_items} value={item.id}>{item.label}</:item>
+        </.list>
+        <box class="absolute left-2 top-8 text-muted">{@selected_timing_run_summary}</box>
+        <box class="absolute left-2 top-10 text-muted">
+          ↑/↓ browse · Enter overlay · c clear · Esc close · * current overlay
+        </box>
       </.modal>
       <.flash_group flash={@breeze.flash} width={42}/>
     </box>
@@ -293,6 +366,22 @@ defmodule EasyBreezy.PresenterView do
 
   def handle_event("close_reset_timer", _event, term) do
     {:noreply, close_reset_timer(term)}
+  end
+
+  def handle_event("close_timing_runs", _event, term) do
+    {:noreply, close_timing_runs(term)}
+  end
+
+  def handle_event(
+        "timing_run_changed",
+        %{value: run_id},
+        %{assigns: %{timing_runs_modal?: true}} = term
+      )
+      when is_binary(run_id) do
+    case Enum.find_index(term.assigns.timing_runs, &(&1.id == run_id)) do
+      nil -> {:noreply, term}
+      index -> {:noreply, assign(term, timing_run_index: index)}
+    end
   end
 
   def handle_event(_, %{"key" => key}, %{assigns: %{reset_timer_modal?: true}} = term)
@@ -309,8 +398,31 @@ defmodule EasyBreezy.PresenterView do
     {:noreply, term}
   end
 
+  def handle_event(_, %{"key" => key}, %{assigns: %{timing_runs_modal?: true}} = term)
+      when key in ["Enter", "\r"] do
+    {:noreply, select_timing_run(term)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{timing_runs_modal?: true}} = term)
+      when key in ["Escape", "q", "r"] do
+    {:noreply, close_timing_runs(term)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{timing_runs_modal?: true}} = term)
+      when key in ["c", "C"] do
+    {:noreply, term |> assign(expected_run: nil) |> close_timing_runs()}
+  end
+
+  def handle_event(_, %{"key" => _key}, %{assigns: %{timing_runs_modal?: true}} = term) do
+    {:noreply, term}
+  end
+
   def handle_event(_, %{"ctrlKey" => true, "key" => key}, term) when key in ["r", "R"] do
     {:noreply, open_reset_timer(term)}
+  end
+
+  def handle_event(_, %{"key" => "r"}, %{assigns: %{source_editor: nil}} = term) do
+    {:noreply, open_timing_runs(term)}
   end
 
   def handle_event(
@@ -387,7 +499,7 @@ defmodule EasyBreezy.PresenterView do
     do: {:noreply, send_command(term, :toggle_source_mode)}
 
   def handle_event(_, %{"key" => "q"}, term) do
-    {:stop, KittyImage.delete_overlay(term)}
+    {:stop, term |> finish_timing_run() |> KittyImage.delete_overlay()}
   end
 
   def handle_event(_, %{"key" => _key} = event, term) do
@@ -443,6 +555,7 @@ defmodule EasyBreezy.PresenterView do
       presentation_timer(payload, term.assigns.started_at_ms)
 
     previous_term = term
+    term = observe_timing_slide(term, deck, slide_index)
 
     term =
       term
@@ -512,15 +625,20 @@ defmodule EasyBreezy.PresenterView do
     term
   end
 
-  defp open_reset_timer(term), do: assign(term, reset_timer_modal?: true)
+  defp open_reset_timer(term) do
+    assign(term, reset_timer_modal?: true, timing_runs_modal?: false)
+  end
 
   defp close_reset_timer(term), do: assign(term, reset_timer_modal?: false)
 
   defp reset_timer(term) do
     started_at_ms = System.monotonic_time(:millisecond)
+    now = DateTime.utc_now()
     paused_elapsed_ms = if term.assigns.timer_paused?, do: 0, else: nil
 
     term
+    |> finish_timing_run(now_ms: started_at_ms, now: now)
+    |> start_timing_run(now_ms: started_at_ms, now: now)
     |> assign(
       reset_timer_modal?: false,
       started_at_ms: started_at_ms,
@@ -529,6 +647,237 @@ defmodule EasyBreezy.PresenterView do
     )
     |> send_command(:reset_timer)
   end
+
+  defp start_timing_run(term, opts) do
+    case PresentationTiming.start_run(
+           term.assigns.deck,
+           term.assigns.slide_index,
+           term.assigns.metadata_dir,
+           opts
+         ) do
+      {:ok, run} ->
+        assign(term, timing_run: run)
+
+      {:error, reason, run} ->
+        term
+        |> assign(timing_run: run)
+        |> put_timing_error(reason)
+
+      {:error, reason} ->
+        put_timing_error(term, reason)
+    end
+  end
+
+  defp finish_timing_run(term, opts \\ [])
+
+  defp finish_timing_run(%{assigns: %{timing_run: nil}} = term, _opts), do: term
+
+  defp finish_timing_run(term, opts) do
+    case PresentationTiming.finish(term.assigns.timing_run, opts) do
+      {:ok, run} ->
+        term
+        |> assign(timing_run: nil, expected_run: term.assigns.expected_run || run)
+        |> refresh_timing_runs()
+
+      {:error, reason, _run} ->
+        term
+        |> assign(timing_run: nil)
+        |> put_timing_error(reason)
+    end
+  end
+
+  defp observe_timing_slide(%{assigns: %{timing_run: nil}} = term, _deck, _slide_index),
+    do: term
+
+  defp observe_timing_slide(term, deck, slide_index) do
+    case PresentationTiming.observe_slide(term.assigns.timing_run, deck, slide_index) do
+      {:ok, run} ->
+        assign(term, timing_run: run)
+
+      {:error, reason, run} ->
+        term
+        |> assign(timing_run: run)
+        |> put_timing_error(reason)
+    end
+  end
+
+  defp refresh_timing_runs(term) do
+    runs = PresentationTiming.list_runs(term.assigns.metadata_dir, term.assigns.deck)
+    assign(term, timing_runs: previous_timing_runs(runs, term.assigns.timing_run))
+  end
+
+  defp open_timing_runs(term) do
+    runs =
+      term.assigns.metadata_dir
+      |> PresentationTiming.list_runs(term.assigns.deck)
+      |> previous_timing_runs(term.assigns.timing_run)
+
+    selected_index =
+      Enum.find_index(runs, fn run ->
+        expected_run_id(term.assigns.expected_run) == run.id
+      end) || 0
+
+    term =
+      assign(term,
+        timing_runs: runs,
+        timing_run_index: selected_index,
+        timing_runs_modal?: true,
+        reset_timer_modal?: false
+      )
+
+    if runs == [] do
+      Breeze.View.focus(term, nil)
+    else
+      Breeze.View.focus(term, "timing-runs-list")
+    end
+  end
+
+  defp close_timing_runs(term) do
+    term
+    |> assign(timing_runs_modal?: false)
+    |> focus_current_live_slide()
+  end
+
+  defp move_timing_run(%{assigns: %{timing_runs: []}} = term, _offset), do: term
+
+  defp move_timing_run(term, offset) do
+    last_index = length(term.assigns.timing_runs) - 1
+    index = term.assigns.timing_run_index + offset
+    assign(term, timing_run_index: index |> max(0) |> min(last_index))
+  end
+
+  defp select_timing_run(term) do
+    case Enum.at(term.assigns.timing_runs, term.assigns.timing_run_index) do
+      nil ->
+        close_timing_runs(term)
+
+      run ->
+        term
+        |> assign(expected_run: run)
+        |> close_timing_runs()
+    end
+  end
+
+  defp previous_timing_runs(runs, nil), do: runs
+
+  defp previous_timing_runs(runs, timing_run) do
+    Enum.reject(runs, &(&1.id == timing_run.id))
+  end
+
+  defp initial_expected_run(opts, runs, deck) do
+    if Keyword.has_key?(opts, :expected_run) do
+      case Keyword.get(opts, :expected_run) do
+        nil ->
+          nil
+
+        %PresentationTiming.Run{} = run ->
+          if PresentationTiming.compatible?(run, deck),
+            do: run,
+            else: Enum.find(runs, &PresentationTiming.complete?/1)
+
+        _run ->
+          Enum.find(runs, &PresentationTiming.complete?/1)
+      end
+    else
+      Enum.find(runs, &PresentationTiming.complete?/1)
+    end
+  end
+
+  defp put_timing_error(term, reason) do
+    put_flash(
+      term,
+      :error,
+      "Could not save timing run: #{inspect(reason)}",
+      id: "timing-run-error",
+      duration: 5_000
+    )
+  end
+
+  defp footer_status(timer_paused?, timing_label, width, height, available_width) do
+    timer_action = if timer_paused?, do: "resume", else: "pause"
+    core = "p #{timer_action} · r runs · #{timing_label}"
+    full = "#{core} · presentation #{width}x#{height}"
+    compact = "#{core} · #{width}x#{height}"
+
+    cond do
+      String.length(full) <= available_width -> full
+      String.length(compact) <= available_width -> compact
+      true -> truncate_label(core, available_width)
+    end
+  end
+
+  defp timing_label(timing_run, expected_run, slide_index, slide) do
+    current = current_timing_label(timing_run, slide_index)
+
+    expected =
+      case expected_run &&
+             PresentationTiming.expected_duration_ms(
+               expected_run,
+               slide_index,
+               Map.get(slide, :id)
+             ) do
+        duration_ms when is_integer(duration_ms) ->
+          "expected #{PresentationTiming.format_duration(duration_ms)}"
+
+        _duration_ms ->
+          nil
+      end
+
+    case {current, expected} do
+      {nil, nil} -> "timing off"
+      {nil, expected} -> expected
+      {current, nil} -> current
+      {current, expected} -> "#{current} / #{expected}"
+    end
+  end
+
+  defp current_timing_label(nil, _slide_index), do: nil
+
+  defp current_timing_label(timing_run, _slide_index)
+       when not is_nil(timing_run.backtracking_started_at_ms),
+       do: "backtrack ignored"
+
+  defp current_timing_label(timing_run, slide_index)
+       when timing_run.tracked_slide_index == slide_index do
+    "this #{PresentationTiming.format_duration(PresentationTiming.current_duration_ms(timing_run))}"
+  end
+
+  defp current_timing_label(_timing_run, _slide_index), do: "timing active"
+
+  defp timing_run_items(runs, expected_run) do
+    Enum.map(runs, fn run ->
+      overlay? = expected_run_id(expected_run) == run.id
+      overlay = if overlay?, do: "*", else: " "
+      total_slides = run.deck |> Map.get(:slides, []) |> length()
+      status = if PresentationTiming.complete?(run), do: "complete", else: "partial"
+
+      label =
+        "#{overlay} #{timing_run_started_at(run)} · " <>
+          "#{PresentationTiming.format_duration(PresentationTiming.total_duration_ms(run))} · " <>
+          "#{PresentationTiming.visited_slide_count(run)}/#{total_slides} slides · #{status}"
+
+      %{id: run.id, label: truncate_label(label, 65)}
+    end)
+  end
+
+  defp timing_run_summary(nil), do: "Select a run to use its per-slide expected times."
+
+  defp timing_run_summary(run) do
+    ("#{Map.get(run.deck, :title, "Untitled Deck")} · " <>
+       "#{PresentationTiming.visited_slide_count(run)} timed slides · " <>
+       "#{PresentationTiming.format_duration(PresentationTiming.total_duration_ms(run))} total")
+    |> truncate_label(68)
+  end
+
+  defp timing_run_started_at(%{started_at: started_at}) when is_binary(started_at) do
+    started_at
+    |> String.slice(0, 16)
+    |> String.replace("T", " ")
+    |> Kernel.<>("Z")
+  end
+
+  defp expected_run_id(%{id: id}), do: id
+  defp expected_run_id(_run), do: nil
 
   defp toggle_timer_pause(%{assigns: %{timer_paused?: true}} = term) do
     elapsed_ms = timer_elapsed_ms(term.assigns)
@@ -584,7 +933,15 @@ defmodule EasyBreezy.PresenterView do
 
   defp scroll_keybindings do
     Enum.map(PresenterScroll.keys(), fn key ->
-      {key, fn event, term -> {:noreply, sync_scroll(term, event)} end}
+      {key,
+       fn event, term ->
+         if term.assigns.timing_runs_modal? do
+           offset = if key in ["ArrowDown", "j"], do: 1, else: -1
+           {:noreply, move_timing_run(term, offset)}
+         else
+           {:noreply, sync_scroll(term, event)}
+         end
+       end}
     end)
   end
 

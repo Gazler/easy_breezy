@@ -23,12 +23,14 @@ defmodule EasyBreezy.Layouts.TitleSlide do
 
     theme_colors = Map.get(assigns.render_context, :theme_colors, %{})
     animate_title_gradient? = Map.get(assigns.render_context, :animate_title_gradient?, true)
+    animate_text_shimmer? = Map.get(assigns.render_context, :animate_text_shimmer?, true)
     animation_frozen_now = Map.get(assigns.render_context, :animation_frozen_now)
 
     assigns =
       assigns
       |> assign(theme_colors: theme_colors)
       |> assign(animate_title_gradient?: animate_title_gradient?)
+      |> assign(animate_text_shimmer?: animate_text_shimmer?)
       |> assign(animation_frozen_now: animation_frozen_now)
       |> assign(title_region_style: title_region_style(assigns))
       |> assign(
@@ -52,6 +54,7 @@ defmodule EasyBreezy.Layouts.TitleSlide do
         <.h1
           id={@title_gradient_id}
           animate_gradient={@animate_title_gradient?}
+          static_shimmer={!@animate_text_shimmer?}
           class="text-gradient-to-b from-primary to-secondary"
           theme_colors={@theme_colors}
           background={Map.get(@theme_colors, :surface)}
@@ -69,6 +72,7 @@ defmodule EasyBreezy.Layouts.TitleSlide do
         <.text
           :if={@footer}
           id={@footer_shimmer_id}
+          static_shimmer={!@animate_text_shimmer?}
           class="text-shimmer from-muted to-text"
           theme_colors={@theme_colors}
           background={Map.get(@theme_colors, :surface)}

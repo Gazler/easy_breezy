@@ -2,7 +2,7 @@ defmodule EasyBreezy.PresenterViewTest do
   use ExUnit.Case, async: false
 
   alias EasyBreezy.Deck.Markdown
-  alias EasyBreezy.{Deck, Slide}
+  alias EasyBreezy.{Deck, PresentationTiming, Slide}
 
   defmodule LivePreviewView do
     use Breeze.View
@@ -89,12 +89,19 @@ defmodule EasyBreezy.PresenterViewTest do
   test "confirming the reset timer prompt resets the local clock and presentation timer" do
     sync_name = {:easy_breezy_reset_timer_test, System.unique_integer([:positive])}
     EasyBreezy.PresenterSync.register(sync_name)
+    metadata_dir = temporary_metadata_dir()
+    on_exit(fn -> File.rm_rf(metadata_dir) end)
 
     session =
       Breeze.Test.start!(EasyBreezy.PresenterView,
         size: {100, 24},
         theme: Breeze.Theme.builtin(:nebula),
-        start_opts: [deck: text_deck(), theme: :nebula, sync_name: sync_name]
+        start_opts: [
+          deck: text_deck(),
+          theme: :nebula,
+          sync_name: sync_name,
+          metadata_dir: metadata_dir
+        ]
       )
 
     on_exit(fn -> Breeze.Test.stop(session) end)
@@ -120,8 +127,180 @@ defmodule EasyBreezy.PresenterViewTest do
 
     refute Breeze.Test.metadata(session).assigns.reset_timer_modal?
     assert Breeze.Test.metadata(session).assigns.started_at_ms > old_started_at_ms
+    assert Breeze.Test.metadata(session).assigns.timing_run.status == :active
+    assert File.dir?(Path.join(metadata_dir, "timings"))
     assert session |> Breeze.Test.render!() |> strip_ansi() =~ "Elapsed 00:00"
     assert_receive {:easy_breezy_presenter_command, _pid, :reset_timer}
+  end
+
+  test "slide timing continues independently of a paused presentation timer" do
+    metadata_dir = temporary_metadata_dir()
+    on_exit(fn -> File.rm_rf(metadata_dir) end)
+    deck = preview_deck()
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {120, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula, metadata_dir: metadata_dir]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+
+    Breeze.Test.event(session, nil, %{"ctrlKey" => true, "key" => "r"})
+    Breeze.Test.input(session, "Enter")
+
+    timing_run = Breeze.Test.metadata(session).assigns.timing_run
+    assert timing_run.tracked_slide_index == 0
+
+    Breeze.Test.input(session, "p")
+    paused_assigns = Breeze.Test.metadata(session).assigns
+
+    assert paused_assigns.timer_paused?
+    assert paused_assigns.timing_run.segment_started_at_ms == timing_run.segment_started_at_ms
+
+    Process.sleep(2)
+
+    payload =
+      deck
+      |> presentation_payload(1)
+      |> Map.put(:timer_paused?, true)
+      |> Map.put(:elapsed_ms, paused_assigns.paused_elapsed_ms)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, payload})
+
+    run = Breeze.Test.metadata(session).assigns.timing_run
+    assert run.tracked_slide_index == 1
+    assert hd(run.visits).duration_ms >= 1
+    assert Enum.map(run.visits, & &1.slide_index) == [0, 1]
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+    run = Breeze.Test.metadata(session).assigns.timing_run
+    assert PresentationTiming.backtracking?(run)
+    assert Enum.map(run.visits, & &1.slide_index) == [0, 1]
+
+    Breeze.Test.event(session, nil, %{"ctrlKey" => true, "key" => "r"})
+    Breeze.Test.input(session, "Enter")
+
+    next_assigns = Breeze.Test.metadata(session).assigns
+    assert next_assigns.expected_run.id == run.id
+    assert next_assigns.timing_run.id != run.id
+  end
+
+  test "browses previous runs and selects expected per-slide timings" do
+    metadata_dir = temporary_metadata_dir()
+    on_exit(fn -> File.rm_rf(metadata_dir) end)
+    deck = preview_deck()
+
+    {:ok, run} =
+      PresentationTiming.start_run(deck, 0, metadata_dir,
+        now_ms: 0,
+        now: "2026-08-21T10:00:00.000Z"
+      )
+
+    {:ok, run} =
+      PresentationTiming.observe_slide(run, deck, 1,
+        now_ms: 5_000,
+        now: "2026-08-21T10:00:05.000Z"
+      )
+
+    {:ok, expected_run} =
+      PresentationTiming.finish(run,
+        now_ms: 10_000,
+        now: "2026-08-21T10:00:10.000Z"
+      )
+
+    {:ok, older_run} =
+      PresentationTiming.start_run(deck, 0, metadata_dir,
+        now_ms: 0,
+        now: "2026-08-20T09:00:00.000Z"
+      )
+
+    {:ok, older_run} =
+      PresentationTiming.observe_slide(older_run, deck, 1,
+        now_ms: 3_000,
+        now: "2026-08-20T09:00:03.000Z"
+      )
+
+    {:ok, older_run} =
+      PresentationTiming.finish(older_run,
+        now_ms: 6_000,
+        now: "2026-08-20T09:00:06.000Z"
+      )
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {100, 24},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula, metadata_dir: metadata_dir]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+
+    assigns = Breeze.Test.metadata(session).assigns
+    assert assigns.expected_run.id == expected_run.id
+    assert session |> Breeze.Test.render!() |> strip_ansi() =~ "expected 00:05"
+
+    Breeze.Test.input(session, "r")
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+
+    assert plain =~ "Previous Timing Runs"
+    assert plain =~ "2026-08-21 10:00Z"
+    assert plain =~ "00:10"
+    assert plain =~ "2/2 slides"
+    assert Breeze.Test.focused(session) == "timing-runs-list"
+
+    assert {Breeze.Implicit.List, %{selected: selected_run_id, loop: false}} =
+             Breeze.Test.metadata(session).implicit_state["timing-runs-list"]
+
+    assert selected_run_id == expected_run.id
+
+    Breeze.Test.input(session, "ArrowDown")
+    assert Breeze.Test.metadata(session).assigns.timing_run_index == 1
+
+    Breeze.Test.input(session, "Enter")
+    assert Breeze.Test.metadata(session).assigns.expected_run.id == older_run.id
+
+    Breeze.Test.input(session, "r")
+    Breeze.Test.input(session, "c")
+    assert is_nil(Breeze.Test.metadata(session).assigns.expected_run)
+
+    Breeze.Test.input(session, "r")
+    Breeze.Test.input(session, "Enter")
+    assert Breeze.Test.metadata(session).assigns.expected_run.id == expected_run.id
+  end
+
+  test "title previews render text effects without animation overlay processes" do
+    deck = title_preview_deck()
+
+    session =
+      Breeze.Test.start!(EasyBreezy.PresenterView,
+        size: {120, 30},
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [deck: deck, theme: :nebula]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.info(session, {:easy_breezy_presentation_state, presentation_payload(deck, 0)})
+
+    plain = session |> Breeze.Test.render!() |> strip_ansi()
+    assert plain =~ "Static footer"
+    assert plain =~ "Next footer"
+
+    implicit_modules =
+      session
+      |> Breeze.Test.metadata()
+      |> Map.fetch!(:implicit_state)
+      |> Map.values()
+      |> Enum.map(&elem(&1, 0))
+
+    refute EasyBreezy.Implicit.TitleGradient in implicit_modules
+    refute EasyBreezy.Implicit.TextShimmer in implicit_modules
   end
 
   test "p pauses and resumes the presentation timer" do
@@ -749,6 +928,26 @@ defmodule EasyBreezy.PresenterViewTest do
     }
   end
 
+  defp title_preview_deck do
+    %Deck{
+      title: "Presenter Title Preview",
+      slides: [
+        %Slide{
+          id: :current_title,
+          title: "Current title",
+          layout: :title,
+          payload: %{title: "Current title", footer: "Static footer"}
+        },
+        %Slide{
+          id: :next_title,
+          title: "Next title",
+          layout: :title,
+          payload: %{title: "Next title", footer: "Next footer"}
+        }
+      ]
+    }
+  end
+
   defp markdown_preview_deck do
     markdown = "- `Termite.Screen` is the escape-sequence layer"
 
@@ -803,6 +1002,13 @@ defmodule EasyBreezy.PresenterViewTest do
   defp text_payload(title), do: %{title: title, items: ["One"]}
 
   defp strip_ansi(text), do: Regex.replace(~r/\e\[[0-9;]*m/, text, "")
+
+  defp temporary_metadata_dir do
+    Path.join(
+      System.tmp_dir!(),
+      "easy-breezy-presenter-timing-#{System.unique_integer([:positive, :monotonic])}"
+    )
+  end
 
   defp scroll_offset(session, id) do
     {Breeze.Implicit.Scroll, state} = Breeze.Test.metadata(session).implicit_state[id]

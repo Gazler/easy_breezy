@@ -47,6 +47,7 @@ defmodule EasyBreezy do
       :sync_name,
       :presenter_sync_node,
       :sync_node,
+      :metadata_dir,
       :source_editor,
       :source_save_notice,
       :source_mode?,
@@ -192,6 +193,9 @@ defmodule EasyBreezy do
     |> maybe_put_assign(assigns, :started_at_ms)
     |> maybe_put_assign(assigns, :timer_paused?)
     |> maybe_put_assign(assigns, :paused_elapsed_ms)
+    |> maybe_put_assign(assigns, :metadata_dir)
+    |> maybe_put_assign(assigns, :timing_run)
+    |> maybe_put_assign(assigns, :expected_run)
     |> maybe_put_assign(assigns, :source_editor)
     |> maybe_put_assign(assigns, :source_save_notice)
     |> maybe_put_assign(assigns, :source_mode?)

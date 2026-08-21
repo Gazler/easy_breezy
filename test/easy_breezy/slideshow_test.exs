@@ -338,6 +338,30 @@ defmodule EasyBreezy.SlideshowTest do
     assert Breeze.Test.metadata(session).assigns.paused_elapsed_ms == 125_000
   end
 
+  test "preserves presenter timing runs through refreshed server options" do
+    timing_run = %{id: "active-run"}
+    expected_run = %{id: "expected-run"}
+    metadata_dir = Path.join(System.tmp_dir!(), "easy-breezy-metadata")
+
+    assert [start_opts: start_opts] =
+             EasyBreezy.refresh_server_opts(
+               [deck: fn -> deck() end],
+               %{
+                 metadata: %{
+                   assigns: %{
+                     metadata_dir: metadata_dir,
+                     timing_run: timing_run,
+                     expected_run: expected_run
+                   }
+                 }
+               }
+             )
+
+    assert Keyword.fetch!(start_opts, :metadata_dir) == metadata_dir
+    assert Keyword.fetch!(start_opts, :timing_run) == timing_run
+    assert Keyword.fetch!(start_opts, :expected_run) == expected_run
+  end
+
   test "passes the header theme status option through to the slideshow" do
     assert [start_opts: start_opts] =
              EasyBreezy.refresh_server_opts(

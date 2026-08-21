@@ -22,3 +22,6 @@ easy_breezy-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 *.actual
+
+# Local presenter timing runs.
+.easy_breezy/

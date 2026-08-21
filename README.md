@@ -35,6 +35,26 @@ tasks use the long node names
 `slides@127.0.0.1` and `presenter@127.0.0.1`; they report an error instead of
 starting EPMD automatically when it is unavailable.
 
+### Timing runs
+
+In the presenter view, press `Ctrl+r` and confirm the timer reset to start a
+timing run. EasyBreezy records a wall-clock enter and leave time for each
+forward slide visit. Pausing the presentation timer does not pause slide
+timing. Backward navigation is treated as an ignored detour: it creates no
+visits and its duration is excluded until the presentation catches up to its
+previous furthest slide.
+
+The footer shows the current slide duration. The newest completed run is used
+as the expected per-slide timing automatically; press `r` to browse and select
+another run, or `c` in the run picker to clear the overlay. Resetting again or
+quitting the presenter with `q` completes the active run.
+
+Runs are written incrementally as human-readable JSON beneath
+`.easy_breezy/timings/` in the directory from which the presentation was
+launched. An initial file is saved on reset, then updated atomically after each
+forward slide change and when the run completes. Pass `metadata_dir:` to
+`EasyBreezy.run/1` to use a different metadata directory.
+
 ## Full-image slides
 
 Use the `:image` layout to fill the complete slide body with an image:

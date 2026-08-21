@@ -28,6 +28,7 @@ defmodule EasyBreezy.MixProject do
       {:breeze, path: "~/dev/breeze/breeze", override: true},
       {:back_breeze, path: "~/dev/breeze/back_breeze", override: true},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
+      {:jason, "~> 1.4"},
       {:lumis, "~> 0.5.0"},
       {:nimble_parsec, "~> 1.4"}
     ]
