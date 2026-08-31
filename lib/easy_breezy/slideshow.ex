@@ -450,7 +450,7 @@ defmodule EasyBreezy.Slideshow do
     with true <- presenter_subscribed?(term.assigns, pid),
          false <- breeze_slide_transition?(term.assigns),
          {:ok, command} <- normalize_presenter_command(command) do
-      {:noreply, handle_presenter_command(command, term)}
+      handle_presenter_info_command(command, term)
     else
       _other -> {:noreply, term, invalidate: false}
     end
@@ -825,6 +825,26 @@ defmodule EasyBreezy.Slideshow do
 
   defp normalize_presenter_command(_command), do: :error
 
+  defp handle_presenter_info_command({:input, %{"key" => _key} = event}, term) do
+    if match?(%SourceEditor{}, term.assigns.source_editor) do
+      {:noreply, handle_source_editor_event(term, event)}
+    else
+      case dispatch_visible_live_input(term, event) do
+        {:consumed, term} ->
+          # The parent server already rendered the live-child patch while dispatching the input.
+          # A root invalidation can deadlock with the next synchronous live-input dispatch.
+          {:noreply, maybe_publish_presentation_soon(term), invalidate: false}
+
+        {:not_consumed, term} ->
+          {:noreply, handle_presenter_key_event(event, term)}
+      end
+    end
+  end
+
+  defp handle_presenter_info_command(command, term) do
+    {:noreply, handle_presenter_command(command, term)}
+  end
+
   defp handle_presenter_command(:next, term),
     do: term |> advance() |> maybe_publish_presentation_soon()
 
@@ -891,17 +911,6 @@ defmodule EasyBreezy.Slideshow do
       term
       |> PresenterScroll.apply(event)
       |> maybe_publish_presentation_soon()
-    end
-  end
-
-  defp handle_presenter_command({:input, %{"key" => _key} = event}, term) do
-    if match?(%SourceEditor{}, term.assigns.source_editor) do
-      handle_source_editor_event(term, event)
-    else
-      case dispatch_visible_live_input(term, event) do
-        {:consumed, term} -> maybe_publish_presentation_soon(term)
-        {:not_consumed, term} -> handle_presenter_key_event(event, term)
-      end
     end
   end
 

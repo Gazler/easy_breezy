@@ -15,7 +15,7 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
   defmodule CounterView do
     use Breeze.View
 
-    def mount(_opts, term), do: {:ok, assign(term, count: 0)}
+    def mount(_opts, term), do: {:ok, assign(term, count: 0, input_count: 0)}
 
     def render(assigns) do
       ~H"""
@@ -27,7 +27,19 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
     end
 
     def handle_event(_, %{"key" => key}, term) when key in ["ArrowUp", "c"] do
-      {:noreply, assign(term, count: term.assigns.count + 1)}
+      {:noreply,
+       assign(term,
+         count: term.assigns.count + 1,
+         input_count: term.assigns.input_count + 1
+       )}
+    end
+
+    def handle_event(_, %{"key" => "ArrowDown"}, term) do
+      {:noreply,
+       assign(term,
+         count: term.assigns.count - 1,
+         input_count: term.assigns.input_count + 1
+       )}
     end
 
     def handle_event(_, _event, term), do: {:noreply, term}
@@ -203,6 +215,38 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
 
     assert {:noreply, _focused, _changed?} = Breeze.Test.input(presenter, "ArrowUp")
     assert eventually(fn -> render_plain(presenter) =~ "value: 1" end)
+  end
+
+  test "back-to-back presenter input on a live slide does not deadlock the presentation" do
+    sync_name = {:easy_breezy_live_input_deadlock_test, System.unique_integer([:positive])}
+    presentation = start_server_presentation(deck(), sync_name: sync_name)
+    {presenter, presenter_terminal} = start_server_presenter(deck(), sync_name: sync_name)
+
+    on_exit(fn ->
+      if Process.alive?(presenter), do: GenServer.stop(presenter)
+      if Process.alive?(presentation), do: GenServer.stop(presentation)
+    end)
+
+    presenter_view = :sys.get_state(presenter).view_pid
+
+    assert eventually(fn ->
+             snapshot = Breeze.ChildServer.metadata(presenter_view).assigns.live_snapshot
+             is_map(snapshot) and snapshot.content =~ "value: 0"
+           end)
+
+    counter = :sys.get_state(presentation).children["breeze-slide-counter"].pid
+
+    send(presenter, {presenter_terminal.reader, {:data, "\e[A"}})
+    send(presenter, {presenter_terminal.reader, {:data, "\e[B"}})
+
+    assert eventually(fn -> Breeze.ChildServer.metadata(counter).assigns.input_count == 2 end)
+
+    send(presenter, {presenter_terminal.reader, {:data, "\e[A"}})
+
+    assert eventually(fn ->
+             assigns = Breeze.ChildServer.metadata(counter).assigns
+             assigns.input_count == 3 and assigns.count == 1
+           end)
   end
 
   test "presenter renders the live snapshot after presentation navigates into a live slide" do
@@ -432,6 +476,26 @@ defmodule EasyBreezy.SlideshowPresenterLiveTest do
       )
 
     pid
+  end
+
+  defp start_server_presenter(deck, opts) do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: EasyBreezy.PresenterView,
+        terminal: terminal,
+        theme: Breeze.Theme.builtin(:nebula),
+        start_opts: [
+          deck: deck,
+          presenter_mode: :presenter,
+          sync_name: Keyword.get(opts, :sync_name),
+          themes: [:nebula],
+          theme: :nebula
+        ]
+      )
+
+    {pid, terminal}
   end
 
   defp start_fake_server_presentation(deck) do
