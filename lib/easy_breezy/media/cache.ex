@@ -152,5 +152,4 @@ defmodule EasyBreezy.Media.Cache do
   rescue
     _error -> :uncacheable
   end
-
 end

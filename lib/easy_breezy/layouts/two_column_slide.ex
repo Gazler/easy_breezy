@@ -202,11 +202,7 @@ defmodule EasyBreezy.Layouts.TwoColumnSlide do
           </box>
         </.panel>
       </box>
-      <box
-        :if={not @image_mode?}
-        style={@panel_style}
-        class="grid grid-cols-2 width-full"
-      >
+      <box :if={not @image_mode?} style={@panel_style} class="grid grid-cols-2 width-full">
         <box style={@panel_style} class={@left_panel_class}>
           <box :if={@left_title} class="bold text-secondary">{" #{@left_title} "}</box>
           <box :if={@left_title}>
